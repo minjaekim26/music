@@ -3,4 +3,8 @@ backend/.venv/
 frontend/node_modules/
 frontend/dist/
 .env
+backend/.env
+backend/data/ytmusic*.json
+backend/data/search_aliases.db
 *.pyc
+.cursor/

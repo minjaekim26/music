@@ -1,29 +1,39 @@
 # Music Explorer
 
-궁금한 음악을 검색하면 **곡 정보**, **구체적인 장르**, **비슷한 음악 추천**을 제공하는 웹 앱입니다.
+궁금한 음악을 검색하면 **Every Noise 스타일 장르 맵**, **장르 유사도**, **상업곡 추천**을 제공하는 웹 앱입니다.
 
 - 저장소: https://github.com/minjaekim26/music
 - 기술: FastAPI + React + Vite + Tailwind CSS
-- 데이터: [MusicBrainz](https://musicbrainz.org/) (메타데이터·장르) + [Deezer](https://developers.deezer.com/) (미리듣기·유사곡)
+- 데이터: [Last.fm](https://www.last.fm/api) · [MusicBrainz](https://musicbrainz.org/) · [TheAudioDB](https://www.theaudiodb.com/) · Deezer(미리듣기)
 
 ## 기능
 
-- 곡명 / 아티스트 검색
-- 앨범, 발매일, 재생 시간 등 상세 정보
-- MusicBrainz 기반 장르·태그 분석 및 설명
-- 비슷한 아티스트·같은 앨범·장르 기반 유사곡 추천
-- 30초 미리듣기 (Deezer 제공)
+- **상업곡 중심 검색**: Last.fm 리스너/재생 수 기준으로 인기 곡 우선
+- **Every Noise 장르 맵**: 2D 장르 공간에 곡 위치 시각화
+- **장르 유사도**: 분류된 장르별 % 막대 그래프
+- **유사곡 추천**: Last.fm 유사곡 + 장르 맵 거리/태그 유사도 종합 점수
+- **TheAudioDB UI**: 아티스트 배너, 앨범 아트, 무드/스타일, 설명
 
-## 사전 준비
+## API 키 설정 (필수)
 
-| 항목 | 권장 |
-|------|------|
-| Python | 3.10+ |
-| Node.js | 18+ |
+프로젝트 루트에 `.env` 파일을 만듭니다:
+
+```powershell
+copy .env.example .env
+```
+
+`.env` 내용:
+
+```env
+LASTFM_API_KEY=여기에_발급받은_키
+AUDIODB_API_KEY=2
+```
+
+Last.fm API 키 발급: https://www.last.fm/api/account/create
 
 ## 실행 방법
 
-### 1. 백엔드
+### 백엔드
 
 ```powershell
 cd C:\Users\selen\Projects\music\backend
@@ -31,26 +41,12 @@ pip install -r requirements.txt
 python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-또는 프로젝트 루트에서:
-
-```powershell
-.\run-backend.ps1
-```
-
-API 문서: http://127.0.0.1:8000/docs
-
-### 2. 프론트엔드
+### 프론트엔드
 
 ```powershell
 cd C:\Users\selen\Projects\music\frontend
 npm install
 npm run dev
-```
-
-또는:
-
-```powershell
-.\run-frontend.ps1
 ```
 
 브라우저: http://127.0.0.1:5173
@@ -59,8 +55,9 @@ npm run dev
 
 | 엔드포인트 | 설명 |
 |-----------|------|
-| `GET /api/search?q=...` | 음악 검색 |
-| `GET /api/track?mbid=...&deezer_id=...` | 상세 정보 + 장르 + 유사곡 |
+| `GET /api/search?q=...` | 상업곡 검색 |
+| `GET /api/track?...` | 상세 + 장르 맵 + 유사곡 |
+| `GET /api/genre-map` | Every Noise 스타일 장르 노드 |
 
 ## 예시 검색어
 

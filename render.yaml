@@ -1,0 +1,30 @@
+# Render 무료 Web Service (Docker)
+# https://dashboard.render.com → New → Blueprint → 이 repo 연결
+services:
+  - type: web
+    name: music-explorer
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /api/health
+    envVars:
+      - key: SERVE_STATIC
+        value: "1"
+      - key: HOST
+        value: 0.0.0.0
+      - key: LASTFM_API_KEY
+        sync: false
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
+      - key: SOUNDCLOUD_CLIENT_ID
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: YTMUSIC_HEADERS_JSON
+        sync: false
+      - key: AUDIODB_API_KEY
+        value: "2"
+      - key: MUSICBRAINZ_USER_AGENT
+        value: MusicExplorer/1.0 (selendi1511@gmail.com)

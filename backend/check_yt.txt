@@ -1,0 +1,12 @@
+﻿python :   File "<string>", line 1
+위치 C:\Users\selen\AppData\Local\Temp\ps-script-baa2a57a-814f-4dd5-a8f0-5b222ead53a2.ps1:104 문자:43
++ ... ic\backend; python -c "import asyncio, httpx; from platform_search im ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (  File "<string>", line 1:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    import asyncio, httpx; from platform_search import search_ytmusic_tracks; from music_api import search_tracks; asyn
+c def t():
+                                                                                                                   ^^^^
+^
+SyntaxError: invalid syntax

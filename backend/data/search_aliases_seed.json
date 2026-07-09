@@ -1,0 +1,262 @@
+[
+  {
+    "canonical": "drake",
+    "kind": "artist",
+    "aliases": ["드레이크", "드레잌", "드레크", "드레잌크"]
+  },
+  {
+    "canonical": "taylor swift",
+    "kind": "artist",
+    "aliases": ["테일러 스위프트", "테일러스위프트", "테일러", "스위프트"]
+  },
+  {
+    "canonical": "beyonce",
+    "kind": "artist",
+    "aliases": ["비욘세", "비요세", "베요네", "비욘세 노우les"]
+  },
+  {
+    "canonical": "ed sheeran",
+    "kind": "artist",
+    "aliases": ["에드 시런", "에드시런", "에드 쉬란"]
+  },
+  {
+    "canonical": "adele",
+    "kind": "artist",
+    "aliases": ["아델", "아델르"]
+  },
+  {
+    "canonical": "coldplay",
+    "kind": "artist",
+    "aliases": ["콜드플레이", "콜드 플레이"]
+  },
+  {
+    "canonical": "radiohead",
+    "kind": "artist",
+    "aliases": ["라디오헤드", "라디오 헤드"]
+  },
+  {
+    "canonical": "ariana grande",
+    "kind": "artist",
+    "aliases": ["아리아나 그란데", "아리아나그란데", "아리아나"]
+  },
+  {
+    "canonical": "the weeknd",
+    "kind": "artist",
+    "aliases": ["위켄드", "더 위켄드", "위켄드"]
+  },
+  {
+    "canonical": "travis scott",
+    "kind": "artist",
+    "aliases": ["트래비스 스캇", "트래비스스캇", "트래비스"]
+  },
+  {
+    "canonical": "kendrick lamar",
+    "kind": "artist",
+    "aliases": ["켄드릭 라마", "켄드릭라마", "켄드릭"]
+  },
+  {
+    "canonical": "eminem",
+    "kind": "artist",
+    "aliases": ["에미넴", "엠넴"]
+  },
+  {
+    "canonical": "justin bieber",
+    "kind": "artist",
+    "aliases": ["저스틴 비버", "저스틴비버", "비버"]
+  },
+  {
+    "canonical": "billie eilish",
+    "kind": "artist",
+    "aliases": ["빌리 아일리시", "빌리아일리시", "빌리"]
+  },
+  {
+    "canonical": "post malone",
+    "kind": "artist",
+    "aliases": ["포스트 말론", "포스트말론"]
+  },
+  {
+    "canonical": "rihanna",
+    "kind": "artist",
+    "aliases": ["리한나", "리아나", "리한나"]
+  },
+  {
+    "canonical": "bruno mars",
+    "kind": "artist",
+    "aliases": ["브루노 마스", "브루노마스"]
+  },
+  {
+    "canonical": "dua lipa",
+    "kind": "artist",
+    "aliases": ["두아 리파", "두아리파"]
+  },
+  {
+    "canonical": "harry styles",
+    "kind": "artist",
+    "aliases": ["해리 스타일스", "해리스타일스"]
+  },
+  {
+    "canonical": "lady gaga",
+    "kind": "artist",
+    "aliases": ["레이디 가가", "레이디가가", "가가"]
+  },
+  {
+    "canonical": "kanye west",
+    "kind": "artist",
+    "aliases": ["칸예 웨스트", "칸예", "예"]
+  },
+  {
+    "canonical": "jay-z",
+    "kind": "artist",
+    "aliases": ["제이지", "제이 지", "제이-지"]
+  },
+  {
+    "canonical": "bts",
+    "kind": "artist",
+    "aliases": ["방탄소년단", "방탄", "비티에스", "비티스"]
+  },
+  {
+    "canonical": "blackpink",
+    "kind": "artist",
+    "aliases": ["블랙핑크", "블핑", "블랙 핑크"]
+  },
+  {
+    "canonical": "newjeans",
+    "kind": "artist",
+    "aliases": ["뉴진스", "뉴 진스"]
+  },
+  {
+    "canonical": "twice",
+    "kind": "artist",
+    "aliases": ["트와이스", "투아이스"]
+  },
+  {
+    "canonical": "iu",
+    "kind": "artist",
+    "aliases": ["아이유", "이지은"]
+  },
+  {
+    "canonical": "seventeen",
+    "kind": "artist",
+    "aliases": ["세븐틴", "에스쿱스"]
+  },
+  {
+    "canonical": "stray kids",
+    "kind": "artist",
+    "aliases": ["스트레이 키즈", "스트레이키즈", "스키즈"]
+  },
+  {
+    "canonical": "nct",
+    "kind": "artist",
+    "aliases": ["엔시티", "엔씨티"]
+  },
+  {
+    "canonical": "exo",
+    "kind": "artist",
+    "aliases": ["엑소", "엑쏘"]
+  },
+  {
+    "canonical": "red velvet",
+    "kind": "artist",
+    "aliases": ["레드벨벳", "레드 벨벳"]
+  },
+  {
+    "canonical": "aespa",
+    "kind": "artist",
+    "aliases": ["에스파", "æspa"]
+  },
+  {
+    "canonical": "ive",
+    "kind": "artist",
+    "aliases": ["아이브", "아이브"]
+  },
+  {
+    "canonical": "lesserafim",
+    "kind": "artist",
+    "aliases": ["르세라핌", "르 세라핌"]
+  },
+  {
+    "canonical": "queen",
+    "kind": "artist",
+    "aliases": ["퀸", "퀸 밴드"]
+  },
+  {
+    "canonical": "oasis",
+    "kind": "artist",
+    "aliases": ["오아시스"]
+  },
+  {
+    "canonical": "linkin park",
+    "kind": "artist",
+    "aliases": ["링킨 파크", "링킨파크"]
+  },
+  {
+    "canonical": "metallica",
+    "kind": "artist",
+    "aliases": ["메탈리카"]
+  },
+  {
+    "canonical": "nirvana",
+    "kind": "artist",
+    "aliases": ["너바나", "니르바나"]
+  },
+  {
+    "canonical": "the beatles",
+    "kind": "artist",
+    "aliases": ["비틀즈", "비틀스", "더 비틀즈"]
+  },
+  {
+    "canonical": "michael jackson",
+    "kind": "artist",
+    "aliases": ["마이클 잭슨", "마이클잭슨", "잭슨"]
+  },
+  {
+    "canonical": "frank ocean",
+    "kind": "artist",
+    "aliases": ["프랭크 오션", "프랭크오션"]
+  },
+  {
+    "canonical": "sza",
+    "kind": "artist",
+    "aliases": ["스자", "에스제이에이"]
+  },
+  {
+    "canonical": "bad bunny",
+    "kind": "artist",
+    "aliases": ["배드 버니", "배드버니"]
+  },
+  {
+    "canonical": "dynamite",
+    "kind": "track",
+    "aliases": ["다이나마이트", "다이나마잇", "다이너마이트"]
+  },
+  {
+    "canonical": "god's plan",
+    "kind": "track",
+    "aliases": ["갓즈 플랜", "갓스플랜", "갓스 플랜", "신의 계획"]
+  },
+  {
+    "canonical": "blinding lights",
+    "kind": "track",
+    "aliases": ["블라인딩 라이츠", "블라인딩라이츠"]
+  },
+  {
+    "canonical": "shape of you",
+    "kind": "track",
+    "aliases": ["셰이프 오브 유", "셰이프오브유"]
+  },
+  {
+    "canonical": "hype boy",
+    "kind": "track",
+    "aliases": ["하입보이", "하입 보이"]
+  },
+  {
+    "canonical": "ditto",
+    "kind": "track",
+    "aliases": ["디토"]
+  },
+  {
+    "canonical": "super shy",
+    "kind": "track",
+    "aliases": ["슈퍼샤이", "슈퍼 샤이"]
+  }
+]

@@ -1,0 +1,14 @@
+music (distribution) — 곡 검색 · 장르 맵 · 추천
+
+백엔드:  http://127.0.0.1:8000
+프론트:  http://localhost:5173
+
+실행:
+  .\run-backend.ps1
+  .\run-frontend.ps1   (다른 터미널)
+
+Cursor에서 이 프로젝트만 열기:
+  File → Open Workspace from File → music.code-workspace
+
+project-practice와 포트가 다릅니다 (practice = 8001 / 5174).
+Git: https://github.com/minjaekim26/music.git

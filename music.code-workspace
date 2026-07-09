@@ -1,0 +1,16 @@
+{
+  "folders": [
+    {
+      "name": "music (distribution)",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "terminal.integrated.cwd": "${workspaceFolder}",
+    "files.exclude": {
+      "**/node_modules": true,
+      "**/__pycache__": true,
+      "frontend/dist": true
+    }
+  }
+}

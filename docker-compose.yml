@@ -1,0 +1,15 @@
+services:
+  music:
+    build: .
+    ports:
+      - "${PORT:-8080}:8080"
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8080
+      SERVE_STATIC: "1"
+    restart: unless-stopped
+    # YouTube Music 사용 시 아래 주석 해제 (setup-ytmusic.ps1 로 생성한 파일)
+    volumes:
+      - ./backend/data/ytmusic_headers.json:/app/backend/data/ytmusic_headers.json:ro

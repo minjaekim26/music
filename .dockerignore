@@ -1,0 +1,15 @@
+.git
+.cursor
+.env
+.env.*
+!.env.example
+frontend/node_modules
+frontend/dist
+backend/__pycache__
+backend/**/__pycache__
+backend/.venv
+backend/data/ytmusic_headers.json
+backend/data/ytmusic_minimal.json
+backend/data/search_aliases.db
+**/*.pyc
+**/.DS_Store
