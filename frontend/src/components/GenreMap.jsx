@@ -1,5 +1,8 @@
 import React, { useMemo } from "react";
-import EveryNoiseMap from "./EveryNoiseMap.jsx";
+import EveryNoiseMap, {
+  computeLocalBounds,
+  normalizeNodesInBounds,
+} from "./EveryNoiseMap.jsx";
 
 const DEFAULT_BOUNDS = {
   width: 1200,
@@ -8,57 +11,100 @@ const DEFAULT_BOUNDS = {
   minTop: 0,
 };
 
+function normalizeTrackPosition(trackPosition, sourceBounds, localBounds) {
+  if (!trackPosition || !localBounds) return trackPosition;
+  const width = sourceBounds?.width || 1000;
+  const height = sourceBounds?.height || 1000;
+  const minLeft = sourceBounds?.minLeft ?? 0;
+  const minTop = sourceBounds?.minTop ?? 0;
+  const left = minLeft + (trackPosition.x / 1000) * width;
+  const top = minTop + (trackPosition.y / 1000) * height;
+  const w = localBounds.width || 1;
+  const h = localBounds.height || 1;
+  const ox = localBounds.minLeft ?? 0;
+  const oy = localBounds.minTop ?? 0;
+  return {
+    x: ((left - ox) / w) * 1000,
+    y: ((top - oy) / h) * 1000,
+  };
+}
+
+function buildSubgenreNodes(nodes, matched, subgenreNodes) {
+  if (subgenreNodes?.length) return subgenreNodes;
+
+  if (!nodes?.length) return [];
+
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const merged = new Map();
+
+  for (const g of matched) {
+    const full = byId.get(g.id);
+    if (!full) continue;
+    merged.set(full.id, full);
+    const children = full.children || [];
+    if (children.length) {
+      for (const cid of children) {
+        const child = byId.get(cid);
+        if (child) merged.set(child.id, child);
+      }
+    } else if (full.parentId) {
+      const parent = byId.get(full.parentId);
+      if (parent) {
+        merged.set(parent.id, parent);
+        for (const cid of parent.children || []) {
+          const sib = byId.get(cid);
+          if (sib) merged.set(sib.id, sib);
+        }
+      }
+    }
+  }
+
+  return merged.size > 0 ? [...merged.values()] : [];
+}
+
 export default function GenreMap({ genreMap }) {
   const trackPosition = genreMap?.track_position || genreMap?.trackPosition;
   const { nodes, matchedGenres, bounds, subgenre_nodes: subgenreNodes } = genreMap || {};
   const matched = matchedGenres || genreMap?.matched_genres || [];
+  const sourceBounds = bounds || DEFAULT_BOUNDS;
 
-  const displayNodes = useMemo(() => {
-    // 곡 장르의 하위 장르 포커스 맵 (백엔드에서 계산)
-    if (subgenreNodes?.length) {
-      return subgenreNodes;
-    }
+  const { displayNodes, displayBounds, displayTrackPosition, focusMode } = useMemo(() => {
+    const rawNodes = buildSubgenreNodes(nodes, matched, subgenreNodes);
 
-    if (!nodes?.length) return [];
-    if (!trackPosition) return nodes.filter((n) => (n.fontSize || 0) >= 120).slice(0, 400);
-
-    // fallback: 매칭 장르 + 자식 장르
-    const byId = new Map(nodes.map((n) => [n.id, n]));
-    const merged = new Map();
-
-    for (const g of matched) {
-      const full = byId.get(g.id);
-      if (!full) continue;
-      merged.set(full.id, full);
-      const children = full.children || [];
-      if (children.length) {
-        for (const cid of children) {
-          const child = byId.get(cid);
-          if (child) merged.set(child.id, child);
-        }
-      } else if (full.parentId) {
-        const parent = byId.get(full.parentId);
-        if (parent) {
-          merged.set(parent.id, parent);
-          for (const cid of parent.children || []) {
-            const sib = byId.get(cid);
-            if (sib) merged.set(sib.id, sib);
-          }
-        }
+    if (!rawNodes.length) {
+      if (!nodes?.length || !trackPosition) {
+        return {
+          displayNodes: nodes?.filter((n) => (n.fontSize || 0) >= 120).slice(0, 400) || [],
+          displayBounds: sourceBounds,
+          displayTrackPosition: trackPosition,
+          focusMode: false,
+        };
       }
+      const radius = 120;
+      const near = nodes.filter((node) => {
+        const dx = node.x - trackPosition.x;
+        const dy = node.y - trackPosition.y;
+        return Math.sqrt(dx * dx + dy * dy) <= radius;
+      });
+      return {
+        displayNodes: near,
+        displayBounds: sourceBounds,
+        displayTrackPosition: trackPosition,
+        focusMode: false,
+      };
     }
 
-    if (merged.size > 0) {
-      return [...merged.values()].slice(0, 120);
-    }
+    const localBounds = computeLocalBounds(rawNodes, sourceBounds, 100);
+    const normalized = normalizeNodesInBounds(rawNodes, sourceBounds, localBounds);
+    const normalizedTrack = normalizeTrackPosition(trackPosition, sourceBounds, localBounds);
 
-    const radius = 120;
-    return nodes.filter((node) => {
-      const dx = node.x - trackPosition.x;
-      const dy = node.y - trackPosition.y;
-      return Math.sqrt(dx * dx + dy * dy) <= radius;
-    });
-  }, [nodes, trackPosition, matched, subgenreNodes]);
+    return {
+      displayNodes: normalized,
+      displayBounds: localBounds,
+      displayTrackPosition: normalizedTrack,
+      focusMode: true,
+    };
+  }, [nodes, trackPosition, matched, subgenreNodes, sourceBounds]);
 
   if (!genreMap) {
     return (
@@ -72,16 +118,35 @@ export default function GenreMap({ genreMap }) {
     <div className="overflow-hidden rounded-2xl border border-zinc-900/10 bg-white shadow-sm dark:border-white/10 dark:bg-[#07070d]">
       <div className="border-b border-zinc-900/10 px-4 py-2.5 dark:border-white/5">
         <h3 className="font-display text-sm font-semibold text-zinc-900 dark:text-white">장르 맵</h3>
-        <p className="mt-0.5 text-[11px] text-zinc-500">이 곡 장르의 하위 장르를 표시합니다</p>
+        <p className="mt-0.5 text-[11px] text-zinc-500">
+          {focusMode ? "이 곡 장르 주변의 하위 장르 (확대)" : "장르 위치"}
+        </p>
+        {focusMode && (
+          <div className="mt-2 flex flex-wrap gap-2 text-[10px]">
+            <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/15 px-2 py-0.5 text-violet-700 dark:text-violet-300">
+              <span className="text-violet-500">▲</span> 이 곡
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-accent">
+              <span className="h-2 w-2 rounded-full bg-accent" />
+              매칭 장르
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-zinc-500/10 px-2 py-0.5 text-zinc-600 dark:text-zinc-300">
+              <span className="h-2 w-2 rounded-full border border-zinc-400" />
+              하위 장르
+            </span>
+          </div>
+        )}
       </div>
 
       <EveryNoiseMap
         nodes={displayNodes}
-        bounds={bounds || DEFAULT_BOUNDS}
-        trackPosition={trackPosition}
+        bounds={displayBounds}
+        trackPosition={displayTrackPosition}
         matchedGenres={matched}
-        height={420}
+        height={focusMode ? 480 : 420}
         showAll
+        focusMode={focusMode}
+        autoCenter
       />
     </div>
   );

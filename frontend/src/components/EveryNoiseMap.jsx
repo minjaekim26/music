@@ -70,10 +70,12 @@ export default function EveryNoiseMap({
   height = 520,
   showAll = false,
   searchQuery = "",
+  focusMode = false,
+  autoCenter = false,
 }) {
   const containerRef = useRef(null);
   const [viewport, setViewport] = useState({ left: 0, top: 0, width: 1, height: 1 });
-  const [scale, setScale] = useState(1);
+  const [scale, setScale] = useState(focusMode ? 1.15 : 1);
 
   const canvasSize = useMemo(() => {
     const w = (bounds?.width || 1200) + PAD * 2;
@@ -167,6 +169,19 @@ export default function EveryNoiseMap({
     });
   }, [focusedId, nodes, bounds, scale]);
 
+  useEffect(() => {
+    if (!autoCenter || !trackPx || !containerRef.current) return;
+    const el = containerRef.current;
+    const id = requestAnimationFrame(() => {
+      el.scrollTo({
+        left: Math.max(0, trackPx.left * scale - el.clientWidth / 2),
+        top: Math.max(0, trackPx.top * scale - el.clientHeight / 2),
+        behavior: "auto",
+      });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [autoCenter, trackPx, scale, nodes, bounds]);
+
   return (
     <div className="relative min-w-0">
       <div className="absolute right-3 top-3 z-20 flex gap-1">
@@ -242,11 +257,20 @@ export default function EveryNoiseMap({
                 const active = selection.has(node.id) || selection.has(node.name?.toLowerCase());
                 const focused = focusedId === node.id;
                 const matched = matchedIds.has(node.id);
-                const size = Math.max(11, Math.round((node.fontSize || 100) * 0.13));
+                const baseSize = focusMode ? 14 : Math.max(11, Math.round((node.fontSize || 100) * 0.13));
+                const size = matched && focusMode ? baseSize + 2 : baseSize;
                 const hasChildren = (node.children?.length || 0) > 0;
 
                 const searchHit = searchLower && node.name?.toLowerCase().includes(searchLower);
                 const dimmed = searchLower && !searchHit;
+
+                const pillClass = focusMode
+                  ? matched
+                    ? "rounded-md border border-accent/50 bg-accent/20 px-1.5 py-0.5 shadow-sm shadow-accent/20"
+                    : "rounded-md border border-zinc-900/10 bg-white/90 px-1.5 py-0.5 shadow-sm dark:border-white/15 dark:bg-black/60"
+                  : active || focused || searchHit
+                    ? "rounded bg-white/90 px-0.5 dark:bg-black/50"
+                    : undefined;
 
                 return (
                   <div
@@ -258,28 +282,23 @@ export default function EveryNoiseMap({
                       if (e.key === "Enter" || e.key === " ") onSelect?.(node);
                     }}
                     className={`group absolute cursor-pointer whitespace-nowrap ${
-                      active || focused || searchHit ? "z-30" : "z-10"
+                      active || focused || matched || searchHit ? "z-30" : "z-10"
                     }`}
                     style={{
                       left: left + PAD,
                       top: top + PAD,
                       color: node.color,
                       fontSize: `${size}px`,
-                      fontWeight: active || focused || matched || searchHit ? 700 : 400,
-                      opacity: dimmed ? 0.2 : active || focused || matched ? 1 : 0.85,
+                      fontWeight: matched || active || focused || searchHit ? 700 : focusMode ? 600 : 400,
+                      opacity: dimmed ? 0.2 : matched || active || focused ? 1 : focusMode ? 0.92 : 0.85,
+                      textShadow: focusMode
+                        ? "0 1px 2px rgba(0,0,0,0.35), 0 0 8px rgba(0,0,0,0.2)"
+                        : undefined,
                     }}
                     title={hasChildren ? `${node.name} — 클릭해 하위 장르 보기` : node.name}
                   >
-                    <span
-                      className={
-                        active || focused || searchHit
-                          ? "rounded bg-white/90 px-0.5 dark:bg-black/50"
-                          : undefined
-                      }
-                    >
-                      {node.name}
-                    </span>
-                    {hasChildren && (
+                    <span className={pillClass}>{node.name}</span>
+                    {hasChildren && !focusMode && (
                       <span className="ml-0.5 text-teal-600 opacity-70 group-hover:opacity-100 dark:text-teal-400">
                         »
                       </span>
@@ -290,11 +309,15 @@ export default function EveryNoiseMap({
 
               {trackPx && (
                 <div
-                  className="pointer-events-none absolute z-40 text-violet-500"
-                  style={{ left: trackPx.left - 6, top: trackPx.top - 16 }}
+                  className="pointer-events-none absolute z-40"
+                  style={{ left: trackPx.left - 8, top: trackPx.top - 22 }}
                   title="현재 곡"
                 >
-                  ▲
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-bold text-violet-600 shadow-sm dark:text-violet-300"
+                  >
+                    ▲ 이 곡
+                  </span>
                 </div>
               )}
             </div>
