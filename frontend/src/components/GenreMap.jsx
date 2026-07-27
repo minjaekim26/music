@@ -10,31 +10,55 @@ const DEFAULT_BOUNDS = {
 
 export default function GenreMap({ genreMap }) {
   const trackPosition = genreMap?.track_position || genreMap?.trackPosition;
-  const { nodes, matchedGenres, bounds } = genreMap || {};
+  const { nodes, matchedGenres, bounds, subgenre_nodes: subgenreNodes } = genreMap || {};
+  const matched = matchedGenres || genreMap?.matched_genres || [];
 
   const displayNodes = useMemo(() => {
+    // 곡 장르의 하위 장르 포커스 맵 (백엔드에서 계산)
+    if (subgenreNodes?.length) {
+      return subgenreNodes;
+    }
+
     if (!nodes?.length) return [];
     if (!trackPosition) return nodes.filter((n) => (n.fontSize || 0) >= 120).slice(0, 400);
 
+    // fallback: 매칭 장르 + 자식 장르
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const merged = new Map();
+
+    for (const g of matched) {
+      const full = byId.get(g.id);
+      if (!full) continue;
+      merged.set(full.id, full);
+      const children = full.children || [];
+      if (children.length) {
+        for (const cid of children) {
+          const child = byId.get(cid);
+          if (child) merged.set(child.id, child);
+        }
+      } else if (full.parentId) {
+        const parent = byId.get(full.parentId);
+        if (parent) {
+          merged.set(parent.id, parent);
+          for (const cid of parent.children || []) {
+            const sib = byId.get(cid);
+            if (sib) merged.set(sib.id, sib);
+          }
+        }
+      }
+    }
+
+    if (merged.size > 0) {
+      return [...merged.values()].slice(0, 120);
+    }
+
     const radius = 120;
-    const near = nodes.filter((node) => {
+    return nodes.filter((node) => {
       const dx = node.x - trackPosition.x;
       const dy = node.y - trackPosition.y;
       return Math.sqrt(dx * dx + dy * dy) <= radius;
     });
-
-    const matchedIds = new Set((matchedGenres || []).map((g) => g.id));
-    const merged = new Map();
-    for (const n of near) merged.set(n.id, n);
-    for (const g of matchedGenres || []) {
-      const full = nodes.find((n) => n.id === g.id);
-      if (full) merged.set(full.id, full);
-    }
-    for (const n of nodes) {
-      if (matchedIds.has(n.id)) merged.set(n.id, n);
-    }
-    return merged.size > 0 ? [...merged.values()] : nodes.filter((n) => (n.fontSize || 0) >= 125).slice(0, 300);
-  }, [nodes, trackPosition, matchedGenres]);
+  }, [nodes, trackPosition, matched, subgenreNodes]);
 
   if (!genreMap) {
     return (
@@ -48,14 +72,16 @@ export default function GenreMap({ genreMap }) {
     <div className="overflow-hidden rounded-2xl border border-zinc-900/10 bg-white shadow-sm dark:border-white/10 dark:bg-[#07070d]">
       <div className="border-b border-zinc-900/10 px-4 py-2.5 dark:border-white/5">
         <h3 className="font-display text-sm font-semibold text-zinc-900 dark:text-white">장르 맵</h3>
+        <p className="mt-0.5 text-[11px] text-zinc-500">이 곡 장르의 하위 장르를 표시합니다</p>
       </div>
 
       <EveryNoiseMap
         nodes={displayNodes}
         bounds={bounds || DEFAULT_BOUNDS}
         trackPosition={trackPosition}
-        matchedGenres={matchedGenres}
+        matchedGenres={matched}
         height={420}
+        showAll
       />
     </div>
   );

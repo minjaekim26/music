@@ -15,6 +15,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from audiodb_api import enrich_ui, get_album, search_artist, search_track as adb_search_track
 from genre_map import (
     build_genre_profile,
+    collect_subgenre_focus_nodes,
     filter_leaf_genre_names,
     genre_similarity_between,
     get_genre_map,
@@ -948,6 +949,10 @@ async def get_track_detail(
             "track_position": genre_profile.get("position"),
             "matched_genres": genre_profile.get("genres", []),
             "primary_genre": genre_profile.get("primary_genre"),
+            "subgenre_nodes": collect_subgenre_focus_nodes(
+                genre_profile.get("genres", []),
+                genre_profile.get("position"),
+            ),
         },
         "genres": {
             "primary": primary_genres,

@@ -285,3 +285,56 @@ def map_distance_similarity(pos_a: dict, pos_b: dict) -> float:
     dy = pos_a["y"] - pos_b["y"]
     dist = math.sqrt(dx * dx + dy * dy)
     return round(max(0.0, 100.0 - (dist / 7.0)), 1)
+
+
+def collect_subgenre_focus_nodes(
+    matched_genres: list[dict[str, Any]],
+    track_position: dict[str, Any] | None = None,
+    *,
+    child_limit: int = 100,
+) -> list[dict[str, Any]]:
+    """곡 매칭 장르 + 그 하위 장르(자식) 노드. 자식이 없으면 같은 상위 아래 형제 장르."""
+    nodes = get_genre_map()
+    by_id = {n["id"]: n for n in nodes}
+    keep: set[str] = set()
+    child_candidates: list[str] = []
+
+    for g in matched_genres or []:
+        gid = g.get("id") if isinstance(g, dict) else None
+        if not gid or gid not in by_id:
+            continue
+        keep.add(gid)
+        node = by_id[gid]
+        children = list(node.get("children") or [])
+        if children:
+            child_candidates.extend(children)
+        else:
+            parent = node.get("parentId")
+            if parent and parent in by_id:
+                keep.add(parent)
+                child_candidates.extend(by_id[parent].get("children") or [])
+
+    # 중복 제거 후 곡 위치/폰트 기준으로 상위 N개만
+    uniq_children: list[str] = []
+    seen_c: set[str] = set()
+    for cid in child_candidates:
+        if cid in by_id and cid not in seen_c and cid not in keep:
+            seen_c.add(cid)
+            uniq_children.append(cid)
+
+    def child_rank(cid: str) -> tuple:
+        node = by_id[cid]
+        dist = 0.0
+        if track_position:
+            dx = float(node.get("x", 0)) - float(track_position.get("x", 0))
+            dy = float(node.get("y", 0)) - float(track_position.get("y", 0))
+            dist = math.sqrt(dx * dx + dy * dy)
+        return (dist, -float(node.get("fontSize") or 0))
+
+    uniq_children.sort(key=child_rank)
+    keep.update(uniq_children[:child_limit])
+
+    out = [by_id[gid] for gid in keep if gid in by_id]
+    out.sort(key=lambda n: (-float(n.get("fontSize") or 0), n.get("name") or ""))
+    return out
+
