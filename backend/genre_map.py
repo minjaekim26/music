@@ -213,7 +213,9 @@ def build_genre_profile(tags: list[str], weights: list[float] | None = None) -> 
             "primary_genre": None,
         }
 
-    scores = rollup_genre_scores(scores)
+    # 상위 장르로 뭉개지 않고, 가장 세부적인(하위) 장르를 유지
+    leaf_ids = set(filter_leaf_genre_ids(list(scores.keys())))
+    scores = {gid: score for gid, score in scores.items() if gid in leaf_ids}
 
     if not scores:
         return {

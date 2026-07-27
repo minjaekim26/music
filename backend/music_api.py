@@ -15,11 +15,11 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from audiodb_api import enrich_ui, get_album, search_artist, search_track as adb_search_track
 from genre_map import (
     build_genre_profile,
+    filter_leaf_genre_names,
     genre_similarity_between,
     get_genre_map,
     get_map_bounds,
     map_distance_similarity,
-    rollup_genre_names,
 )
 from lastfm_api import (
     get_artist_top_tags,
@@ -911,7 +911,7 @@ async def get_track_detail(
         similar_raw = await _deezer_fallback_similar(client, dz_track, _normalize_key(title, artist))
 
     primary_genres = [g["name"] for g in genre_profile.get("genres", [])[:8]]
-    classification_tags = primary_genres or rollup_genre_names(tag_list)
+    classification_tags = primary_genres or filter_leaf_genre_names(tag_list)
 
     similar_enriched = []
     for t in similar_raw[:12]:
@@ -920,7 +920,7 @@ async def get_track_detail(
 
     similar_enriched.sort(key=lambda x: x.get("similarity", 0), reverse=True)
 
-    all_tags_unique = rollup_genre_names(list(dict.fromkeys(tag_list))[:15])
+    all_tags_unique = filter_leaf_genre_names(list(dict.fromkeys(tag_list))[:20])
 
     return {
         "mbid": lf_query_mbid
