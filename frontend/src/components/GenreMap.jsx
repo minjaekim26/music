@@ -1,8 +1,5 @@
 import React, { useMemo } from "react";
-import EveryNoiseMap, {
-  computeLocalBounds,
-  normalizeNodesInBounds,
-} from "./EveryNoiseMap.jsx";
+import EveryNoiseMap, { computeLocalBounds } from "./EveryNoiseMap.jsx";
 
 const DEFAULT_BOUNDS = {
   width: 1200,
@@ -10,24 +7,6 @@ const DEFAULT_BOUNDS = {
   minLeft: 0,
   minTop: 0,
 };
-
-function normalizeTrackPosition(trackPosition, sourceBounds, localBounds) {
-  if (!trackPosition || !localBounds) return trackPosition;
-  const width = sourceBounds?.width || 1000;
-  const height = sourceBounds?.height || 1000;
-  const minLeft = sourceBounds?.minLeft ?? 0;
-  const minTop = sourceBounds?.minTop ?? 0;
-  const left = minLeft + (trackPosition.x / 1000) * width;
-  const top = minTop + (trackPosition.y / 1000) * height;
-  const w = localBounds.width || 1;
-  const h = localBounds.height || 1;
-  const ox = localBounds.minLeft ?? 0;
-  const oy = localBounds.minTop ?? 0;
-  return {
-    x: ((left - ox) / w) * 1000,
-    y: ((top - oy) / h) * 1000,
-  };
-}
 
 function buildSubgenreNodes(nodes, matched, subgenreNodes) {
   if (subgenreNodes?.length) return subgenreNodes;
@@ -68,15 +47,14 @@ export default function GenreMap({ genreMap }) {
   const matched = matchedGenres || genreMap?.matched_genres || [];
   const sourceBounds = bounds || DEFAULT_BOUNDS;
 
-  const { displayNodes, displayBounds, displayTrackPosition, focusMode } = useMemo(() => {
+  const { displayNodes, viewBounds, focusMode } = useMemo(() => {
     const rawNodes = buildSubgenreNodes(nodes, matched, subgenreNodes);
 
     if (!rawNodes.length) {
       if (!nodes?.length || !trackPosition) {
         return {
           displayNodes: nodes?.filter((n) => (n.fontSize || 0) >= 120).slice(0, 400) || [],
-          displayBounds: sourceBounds,
-          displayTrackPosition: trackPosition,
+          viewBounds: null,
           focusMode: false,
         };
       }
@@ -88,20 +66,16 @@ export default function GenreMap({ genreMap }) {
       });
       return {
         displayNodes: near,
-        displayBounds: sourceBounds,
-        displayTrackPosition: trackPosition,
+        viewBounds: null,
         focusMode: false,
       };
     }
 
-    const localBounds = computeLocalBounds(rawNodes, sourceBounds, 100);
-    const normalized = normalizeNodesInBounds(rawNodes, sourceBounds, localBounds);
-    const normalizedTrack = normalizeTrackPosition(trackPosition, sourceBounds, localBounds);
+    const localBounds = computeLocalBounds(rawNodes, sourceBounds, 220, 900);
 
     return {
-      displayNodes: normalized,
-      displayBounds: localBounds,
-      displayTrackPosition: normalizedTrack,
+      displayNodes: rawNodes,
+      viewBounds: localBounds,
       focusMode: true,
     };
   }, [nodes, trackPosition, matched, subgenreNodes, sourceBounds]);
@@ -119,7 +93,7 @@ export default function GenreMap({ genreMap }) {
       <div className="border-b border-zinc-900/10 px-4 py-2.5 dark:border-white/5">
         <h3 className="font-display text-sm font-semibold text-zinc-900 dark:text-white">장르 맵</h3>
         <p className="mt-0.5 text-[11px] text-zinc-500">
-          {focusMode ? "이 곡 장르 주변의 하위 장르 (확대)" : "장르 위치"}
+          {focusMode ? "이 곡 장르 주변의 하위 장르" : "장르 위치"}
         </p>
         {focusMode && (
           <div className="mt-2 flex flex-wrap gap-2 text-[10px]">
@@ -140,13 +114,14 @@ export default function GenreMap({ genreMap }) {
 
       <EveryNoiseMap
         nodes={displayNodes}
-        bounds={displayBounds}
-        trackPosition={displayTrackPosition}
+        bounds={sourceBounds}
+        viewBounds={viewBounds}
+        trackPosition={trackPosition}
         matchedGenres={matched}
-        height={focusMode ? 480 : 420}
+        height={focusMode ? 440 : 420}
         showAll
         focusMode={focusMode}
-        autoCenter
+        fitToView={focusMode}
       />
     </div>
   );

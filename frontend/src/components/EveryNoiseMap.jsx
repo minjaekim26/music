@@ -13,7 +13,7 @@ export function nodePixelPos(node, bounds) {
   };
 }
 
-export function computeLocalBounds(nodes, sourceBounds, padding = 120) {
+export function computeLocalBounds(nodes, sourceBounds, padding = 120, minSize = 400) {
   if (!nodes?.length) return sourceBounds;
   let minLeft = Infinity;
   let minTop = Infinity;
@@ -28,14 +28,18 @@ export function computeLocalBounds(nodes, sourceBounds, padding = 120) {
     maxTop = Math.max(maxTop, top);
   }
 
-  const width = Math.max(maxLeft - minLeft + padding * 2, 400);
-  const height = Math.max(maxTop - minTop + padding * 2, 400);
+  const spanW = maxLeft - minLeft + padding * 2;
+  const spanH = maxTop - minTop + padding * 2;
+  const width = Math.max(spanW, minSize);
+  const height = Math.max(spanH, minSize);
+  const extraW = Math.max(0, width - spanW);
+  const extraH = Math.max(0, height - spanH);
 
   return {
-    minLeft: Math.max(0, minLeft - padding),
-    minTop: Math.max(0, minTop - padding),
-    maxLeft: maxLeft + padding,
-    maxTop: maxTop + padding,
+    minLeft: Math.max(0, minLeft - padding - extraW / 2),
+    minTop: Math.max(0, minTop - padding - extraH / 2),
+    maxLeft: maxLeft + padding + extraW / 2,
+    maxTop: maxTop + padding + extraH / 2,
     width,
     height,
   };
@@ -61,6 +65,7 @@ export function normalizeNodesInBounds(nodes, sourceBounds, localBounds) {
 export default function EveryNoiseMap({
   nodes,
   bounds,
+  viewBounds = null,
   selectedGenres = [],
   focusedId = null,
   trackPosition = null,
@@ -71,17 +76,29 @@ export default function EveryNoiseMap({
   showAll = false,
   searchQuery = "",
   focusMode = false,
-  autoCenter = false,
+  fitToView = false,
 }) {
   const containerRef = useRef(null);
   const [viewport, setViewport] = useState({ left: 0, top: 0, width: 1, height: 1 });
-  const [scale, setScale] = useState(focusMode ? 1.15 : 1);
+  const [scale, setScale] = useState(1);
+
+  const renderBounds = viewBounds || bounds;
+
+  const toRenderPos = useCallback(
+    (node) => {
+      const { left, top } = nodePixelPos(node, bounds);
+      const ox = renderBounds?.minLeft ?? 0;
+      const oy = renderBounds?.minTop ?? 0;
+      return { left: left - ox, top: top - oy };
+    },
+    [bounds, renderBounds],
+  );
 
   const canvasSize = useMemo(() => {
-    const w = (bounds?.width || 1200) + PAD * 2;
-    const h = (bounds?.height || 12000) + PAD * 2;
+    const w = (renderBounds?.width || 1200) + PAD * 2;
+    const h = (renderBounds?.height || 12000) + PAD * 2;
     return { width: w, height: h };
-  }, [bounds]);
+  }, [renderBounds]);
 
   const scaledSize = useMemo(
     () => ({
@@ -130,7 +147,7 @@ export default function EveryNoiseMap({
     const vBottom = (viewport.top + viewport.height) / scale + margin;
 
     return nodes.filter((node) => {
-      const { left, top } = nodePixelPos(node, bounds);
+      const { left, top } = toRenderPos(node);
       const px = left + PAD;
       const py = top + PAD;
       const inView = px >= vLeft && px <= vRight && py >= vTop && py <= vBottom;
@@ -142,45 +159,79 @@ export default function EveryNoiseMap({
         (node.fontSize || 0) >= 130;
       return inView || important;
     });
-  }, [nodes, bounds, viewport, scale, selection, focusedId, matchedIds, showAll, searchLower]);
+  }, [nodes, bounds, viewport, scale, selection, focusedId, matchedIds, showAll, searchLower, toRenderPos]);
 
   const trackPx = useMemo(() => {
     if (!trackPosition) return null;
-    const width = bounds?.width || 1000;
-    const height = bounds?.height || 1000;
-    const minLeft = bounds?.minLeft ?? 0;
-    const minTop = bounds?.minTop ?? 0;
+    const { left, top } = nodePixelPos({ x: trackPosition.x, y: trackPosition.y }, bounds);
+    const ox = renderBounds?.minLeft ?? 0;
+    const oy = renderBounds?.minTop ?? 0;
     return {
-      left: minLeft + (trackPosition.x / 1000) * width + PAD,
-      top: minTop + (trackPosition.y / 1000) * height + PAD,
+      left: left - ox + PAD,
+      top: top - oy + PAD,
     };
-  }, [trackPosition, bounds]);
+  }, [trackPosition, bounds, renderBounds]);
 
   useEffect(() => {
     if (!focusedId || !containerRef.current) return;
     const node = nodes?.find((n) => n.id === focusedId);
     if (!node) return;
-    const { left, top } = nodePixelPos(node, bounds);
+    const { left, top } = toRenderPos(node);
     const el = containerRef.current;
     el.scrollTo({
       left: Math.max(0, (left + PAD) * scale - el.clientWidth / 2),
       top: Math.max(0, (top + PAD) * scale - el.clientHeight / 2),
       behavior: "smooth",
     });
-  }, [focusedId, nodes, bounds, scale]);
+  }, [focusedId, nodes, scale, toRenderPos]);
 
   useEffect(() => {
-    if (!autoCenter || !trackPx || !containerRef.current) return;
+    if (!fitToView || !containerRef.current || !nodes?.length) return;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (const node of nodes) {
+      const { left, top } = toRenderPos(node);
+      const px = left + PAD;
+      const py = top + PAD;
+      minX = Math.min(minX, px - 60);
+      minY = Math.min(minY, py - 12);
+      maxX = Math.max(maxX, px + 120);
+      maxY = Math.max(maxY, py + 20);
+    }
+
+    if (trackPx) {
+      minX = Math.min(minX, trackPx.left - 40);
+      minY = Math.min(minY, trackPx.top - 28);
+      maxX = Math.max(maxX, trackPx.left + 80);
+      maxY = Math.max(maxY, trackPx.top + 8);
+    }
+
+    const contentW = Math.max(maxX - minX, 1);
+    const contentH = Math.max(maxY - minY, 1);
+    const margin = 32;
     const el = containerRef.current;
+    const fitScale = Math.min(
+      (el.clientWidth - margin * 2) / contentW,
+      (el.clientHeight - margin * 2) / contentH,
+      1,
+    );
+    const nextScale = Math.max(0.55, +fitScale.toFixed(2));
+
+    setScale(nextScale);
+
     const id = requestAnimationFrame(() => {
       el.scrollTo({
-        left: Math.max(0, trackPx.left * scale - el.clientWidth / 2),
-        top: Math.max(0, trackPx.top * scale - el.clientHeight / 2),
+        left: Math.max(0, ((minX + maxX) / 2) * nextScale - el.clientWidth / 2),
+        top: Math.max(0, ((minY + maxY) / 2) * nextScale - el.clientHeight / 2),
         behavior: "auto",
       });
     });
     return () => cancelAnimationFrame(id);
-  }, [autoCenter, trackPx, scale, nodes, bounds]);
+  }, [fitToView, nodes, trackPx, toRenderPos]);
 
   return (
     <div className="relative min-w-0">
@@ -235,7 +286,7 @@ export default function EveryNoiseMap({
                   height={canvasSize.height}
                 >
                   {matchedGenres.map((g) => {
-                    const { left, top } = nodePixelPos(g, bounds);
+                    const { left, top } = toRenderPos(g);
                     return (
                       <line
                         key={`line-${g.id}`}
@@ -253,12 +304,12 @@ export default function EveryNoiseMap({
               )}
 
               {visibleNodes.map((node) => {
-                const { left, top } = nodePixelPos(node, bounds);
+                const { left, top } = toRenderPos(node);
                 const active = selection.has(node.id) || selection.has(node.name?.toLowerCase());
                 const focused = focusedId === node.id;
                 const matched = matchedIds.has(node.id);
-                const baseSize = focusMode ? 14 : Math.max(11, Math.round((node.fontSize || 100) * 0.13));
-                const size = matched && focusMode ? baseSize + 2 : baseSize;
+                const baseSize = focusMode ? 12 : Math.max(11, Math.round((node.fontSize || 100) * 0.13));
+                const size = matched && focusMode ? baseSize + 1 : baseSize;
                 const hasChildren = (node.children?.length || 0) > 0;
 
                 const searchHit = searchLower && node.name?.toLowerCase().includes(searchLower);
