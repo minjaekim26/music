@@ -388,7 +388,7 @@ export default function App() {
       if (!res.ok) {
         throw new Error(data.detail || "검색에 실패했습니다.");
       }
-      setResults(data.results || []);
+      setResults((data.results || []).filter((t) => (t.relevance ?? 0) > 0));
       setSearchMeta(data.meta || null);
       if (!data.results?.length) {
         setError(`검색 결과가 없습니다. ${searchEmptyHint(data.meta, q)}`);

@@ -559,6 +559,9 @@ async def search_tracks(client: httpx.AsyncClient, query: str, limit: int = 12) 
             _search_relevance(q, item.get("title", ""), item.get("artist", ""), item.get("listeners", 0))
             for q in relevance_queries
         )
+        # 정확도(관련도) 0% 결과는 검색 목록에서 제외
+        if rel <= 0:
+            continue
         scored.append({**item, "relevance": rel})
 
     scored.sort(
