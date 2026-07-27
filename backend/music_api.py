@@ -564,14 +564,7 @@ async def search_tracks(client: httpx.AsyncClient, query: str, limit: int = 12) 
             continue
         scored.append({**item, "relevance": rel})
 
-    scored.sort(
-        key=lambda x: (
-            -float(x.get("relevance", 0) or 0),
-            -int(x.get("commercial_score", 0) or 0),
-            -int(x.get("listeners", 0) or 0),
-            0 if x.get("mbid") else 1,
-        ),
-    )
+    scored.sort(key=_search_sort_key)
     top = _finalize_search_order(scored, fetch_limit)
     enriched = await asyncio.gather(*[_enrich_search_result(client, item) for item in top])
     for row in enriched:
@@ -616,6 +609,7 @@ def _search_relevance(query: str, title: str, artist: str, listeners: int = 0) -
 
 
 def _search_sort_key(item: dict) -> tuple:
+    """정확도(관련도) 높은 순 → 인기순."""
     return (
         -float(item.get("relevance", 0) or 0),
         -int(item.get("commercial_score", 0) or 0),
@@ -629,72 +623,23 @@ def _is_ytmusic_hit(item: dict) -> bool:
 
 
 def _finalize_search_order(scored: list[dict], fetch_limit: int) -> list[dict]:
-    """YouTube Music 결과를 상단에 고정하고 나머지는 관련도순으로 채웁니다."""
-    def ytm_sort_key(item: dict) -> tuple:
-        pure = (item.get("source") or "") == "ytmusic"
-        return (0 if pure else 1, *_search_sort_key(item))
-
-    ytm_items = sorted([x for x in scored if _is_ytmusic_hit(x)], key=ytm_sort_key)
-    other_items = sorted([x for x in scored if not _is_ytmusic_hit(x)], key=_search_sort_key)
-
+    """정확도(관련도) 높은 순으로 정렬해 상위 N개만 반환."""
     seen: set[str] = set()
     ordered: list[dict] = []
-
-    def add_unique(item: dict) -> None:
+    for item in sorted(scored, key=_search_sort_key):
         key = _normalize_key(item.get("title", ""), item.get("artist", ""))
         if not key or key in seen:
-            return
+            continue
         seen.add(key)
         ordered.append(item)
-
-    for item in ytm_items:
-        add_unique(item)
-        if len(ordered) >= fetch_limit:
-            return ordered[:fetch_limit]
-
-    for item in other_items:
-        add_unique(item)
         if len(ordered) >= fetch_limit:
             break
-
-    return ordered[:fetch_limit]
+    return ordered
 
 
 def _promote_platform_results(scored: list[dict], fetch_limit: int, min_slots: int = 4) -> list[dict]:
-    platforms = ("spotify", "soundcloud", "ytmusic")
-    platform_items = [x for x in scored if any(p in (x.get("source") or "") for p in platforms)]
-    if not platform_items:
-        return scored[:fetch_limit]
-
-    top = list(scored[:fetch_limit])
-    in_top = sum(1 for x in top if any(p in (x.get("source") or "") for p in platforms))
-    need = min(min_slots, len(platform_items)) - in_top
-    if need <= 0:
-        return top
-
-    top_keys = {_normalize_key(x.get("title", ""), x.get("artist", "")) for x in top}
-    promoted: list[dict] = []
-    for item in platform_items:
-        key = _normalize_key(item.get("title", ""), item.get("artist", ""))
-        if key in top_keys:
-            continue
-        promoted.append(item)
-        if len(promoted) >= need:
-            break
-    if not promoted:
-        return top
-
-    kept = top[: max(0, fetch_limit - len(promoted))]
-    merged = kept + promoted
-    merged.sort(
-        key=lambda x: (
-            -float(x.get("relevance", 0) or 0),
-            -int(x.get("commercial_score", 0) or 0),
-            -int(x.get("listeners", 0) or 0),
-            0 if x.get("mbid") else 1,
-        )
-    )
-    return merged[:fetch_limit]
+    """Deprecated: relevance-first ordering."""
+    return _finalize_search_order(scored, fetch_limit)
 
 
 async def _enrich_search_result(client: httpx.AsyncClient, item: dict) -> dict:

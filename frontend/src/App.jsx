@@ -388,7 +388,11 @@ export default function App() {
       if (!res.ok) {
         throw new Error(data.detail || "검색에 실패했습니다.");
       }
-      setResults((data.results || []).filter((t) => (t.relevance ?? 0) > 0));
+      setResults(
+        (data.results || [])
+          .filter((t) => (t.relevance ?? 0) > 0)
+          .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0)),
+      );
       setSearchMeta(data.meta || null);
       if (!data.results?.length) {
         setError(`검색 결과가 없습니다. ${searchEmptyHint(data.meta, q)}`);
@@ -592,7 +596,7 @@ export default function App() {
 
           {results.length > 0 && (
             <div className="border-t border-zinc-900/10 dark:border-white/10">
-              <p className="px-3 py-1.5 text-[11px] text-zinc-400">관련도 · 유사도순</p>
+              <p className="px-3 py-1.5 text-[11px] text-zinc-400">정확도 높은 순</p>
               <div className="space-y-1.5 px-2">
                 {searchPagination.slice.map((item) => (
                   <SearchResult
