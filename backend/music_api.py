@@ -766,17 +766,42 @@ def _reason_tokens(*groups: list[str]) -> set[str]:
 
 
 _FEATURE_REASON_RULES: list[tuple[tuple[str, ...], str]] = [
-    (("slow", "ballad", "downtempo", "lento"), "Slow tempo"),
-    (("mid-tempo", "medium"), "Mid tempo"),
-    (("fast", "uptempo", "upbeat", "energetic"), "Upbeat tempo"),
-    (("guitar",), "Similar guitar tone"),
-    (("piano",), "Piano-driven"),
-    (("synth", "synthesizer", "electronic"), "Synth-driven"),
-    (("vocal", "vocals", "singing"), "Strong vocals"),
-    (("emotional", "melancholy", "melancholic", "sad", "heartfelt"), "Emotional vocal"),
-    (("dreamy", "ethereal", "atmospheric"), "Dreamy atmosphere"),
-    (("aggressive", "intense", "raw"), "Intense energy"),
-    (("lo-fi", "lofi"), "Lo-fi texture"),
+    # 악기 / 사운드 텍스처
+    (("guitar", "acoustic guitar", "electric guitar"), "Guitar-driven sound"),
+    (("piano", "keys", "keyboard"), "Piano-based arrangement"),
+    (("synth", "synthesizer", "synth pop", "synthwave"), "Synth-heavy production"),
+    (("bass", "bassline", "bass guitar"), "Strong bass presence"),
+    (("drums", "drum machine", "percussion"), "Prominent rhythmic drive"),
+    (("strings", "orchestral", "orchestra", "violin", "cello"), "Orchestral strings"),
+    (("brass", "trumpet", "saxophone"), "Live brass elements"),
+    (("lo-fi", "lofi"), "Lo-fi aesthetic"),
+    # 보컬 특성
+    (("vocal", "vocals", "singer", "singing"), "Expressive vocal delivery"),
+    (("falsetto", "high pitched", "soprano"), "High-register vocals"),
+    (("rap", "rapper", "hip hop", "trap"), "Rap / flow delivery"),
+    (("harmonies", "choir", "choral", "backing vocals"), "Rich vocal harmonies"),
+    # 분위기 / 감정
+    (("emotional", "melancholy", "melancholic", "heartfelt", "tearful"), "Emotionally resonant tone"),
+    (("sad", "sadness", "grief", "longing"), "Melancholic mood"),
+    (("dreamy", "ethereal", "hazy", "hypnotic"), "Dreamy, ethereal texture"),
+    (("atmospheric", "ambient", "cinematic"), "Cinematic atmosphere"),
+    (("dark", "gloomy", "gothic", "brooding"), "Dark, brooding mood"),
+    (("romantic", "love", "tender", "intimate"), "Romantic and intimate feel"),
+    (("nostalgic", "retro", "vintage"), "Nostalgic retro vibe"),
+    (("uplifting", "hopeful", "euphoric", "joyful"), "Uplifting emotional arc"),
+    (("chill", "relaxing", "calm", "mellow"), "Calm, mellow energy"),
+    (("aggressive", "intense", "raw", "fierce"), "High-intensity energy"),
+    (("groovy", "funky", "groove", "funk"), "Funky, groove-driven feel"),
+    # 프로덕션 스타일
+    (("minimal", "minimalist", "sparse"), "Minimal production style"),
+    (("layered", "lush", "dense", "wall of sound"), "Lush, layered production"),
+    (("distortion", "fuzz", "overdriven", "heavy"), "Distorted guitar texture"),
+    (("reverb", "echo", "spacious", "vast"), "Reverb-soaked sound"),
+    (("808", "trap beat", "hi-hat", "drill"), "Trap / 808-driven beat"),
+    (("jazz", "jazzy", "swing", "improvisation"), "Jazz-influenced phrasing"),
+    (("r&b", "rnb", "soul", "neo soul"), "Soul / R&B groove"),
+    (("folk", "acoustic", "singer-songwriter"), "Acoustic folk sensibility"),
+    (("dance", "club", "edm", "house", "techno"), "Dance floor energy"),
 ]
 
 SIMILARITY_WEIGHTS: dict[str, float] = {
@@ -993,69 +1018,97 @@ def _build_recommendation_reasons(
 
     bd = breakdown or {}
 
+    base_tokens = _reason_tokens(base_genres, base_moods, base_styles, base_tags)
+    sim_tokens = _reason_tokens(sim_tags, sim_genre_names, sim_moods or [], sim_styles or [])
+
+    # 1. 매칭된 장르 — 가장 구체적인 공통 장르 이름
     if bd.get("genre", 0) >= 50:
         matched_genre = False
         for genre in base_genres:
             if genre.lower() in sim_genre_lower:
-                add(_display_genre(genre))
+                add(f"Shared genre: {_display_genre(genre)}")
                 matched_genre = True
                 break
         if not matched_genre and sim_genre_profile.get("primary_genre"):
-            add(_display_genre(sim_genre_profile["primary_genre"]))
+            add(f"Genre: {_display_genre(sim_genre_profile['primary_genre'])}")
 
     if source_genre and bd.get("genre", 0) >= 40:
-        add(_display_genre(source_genre))
+        add(f"Genre match: {_display_genre(source_genre)}")
 
+    # 2. 키워드 매칭
     for keyword in matched_keywords or []:
         add(_display_genre(keyword) if " " in keyword else keyword.capitalize())
 
-    base_tokens = _reason_tokens(base_genres, base_moods, base_styles, base_tags)
-    sim_tokens = _reason_tokens(sim_tags, sim_genre_names, sim_moods or [], sim_styles or [])
+    # 3. 음악적 특징 — mood/style 토큰 기반으로 구체적인 feature 이유
+    feature_reasons: list[str] = []
+    for keywords, label in _FEATURE_REASON_RULES:
+        if any(k in base_tokens for k in keywords) and any(k in sim_tokens for k in keywords):
+            feature_reasons.append(label)
 
-    if bd.get("mood", 0) >= 45:
-        for keywords, label in _FEATURE_REASON_RULES:
-            if any(k in base_tokens for k in keywords) and any(k in sim_tokens for k in keywords):
-                if "tempo" not in label.lower() and "guitar" not in label.lower() and "piano" not in label.lower() and "synth" not in label.lower():
-                    add(label)
+    # 기여도 높은 feature를 우선 추가 (최대 2개)
+    priority_keys = {
+        "mood": ("Emotional", "Melancholic", "Dreamy", "Dark", "Romantic", "Uplifting", "Calm", "Nostalgic", "Groovy"),
+        "instrument": ("Guitar", "Piano", "Synth", "Bass", "Strings", "Brass", "Lo-fi"),
+        "vocal": ("Expressive vocal", "High-register", "Rap", "Rich vocal"),
+        "production": ("Cinematic", "Minimal", "Lush", "Distorted", "Reverb", "Trap", "Dance"),
+    }
+    added_features = 0
+    for group_labels in priority_keys.values():
+        for r in feature_reasons:
+            if any(r.startswith(p) for p in group_labels):
+                add(r)
+                added_features += 1
+                break
+        if added_features >= 2:
+            break
 
+    # 남은 feature 추가 (중복 제외)
+    for r in feature_reasons:
+        if added_features >= 3:
+            break
+        add(r)
+        added_features += 1
+
+    # 4. 템포 — 구체적인 BPM 느낌
     if bd.get("tempo", 0) >= 50:
         tempo_labels = {
-            "slow": "Slow tempo",
-            "mid": "Mid tempo",
-            "fast": "Upbeat tempo",
+            "slow": "Slow, laid-back tempo",
+            "mid": "Mid-tempo groove",
+            "fast": "Fast, high-energy tempo",
         }
         if base_tempo and sim_tempo and base_tempo == sim_tempo:
-            add(tempo_labels.get(base_tempo, "Similar tempo"))
-        else:
-            for keywords, label in _FEATURE_REASON_RULES:
-                if "tempo" in label.lower() or label in ("Upbeat tempo", "Mid tempo"):
-                    if any(k in base_tokens for k in keywords) and any(k in sim_tokens for k in keywords):
-                        add(label)
+            add(tempo_labels.get(base_tempo, "Similar tempo feel"))
 
+    # 5. 아티스트 스타일
     if bd.get("artist", 0) >= 65:
-        add("Similar artist style")
+        add("Similar artist style and production")
 
+    # 6. 시대 — 연도 포함
     if bd.get("era", 0) >= 65:
         base_era = _era_label(base_year)
         sim_era = _era_label(sim_year)
         if base_era and sim_era and base_era == sim_era:
             add(f"Same era ({base_era})")
         elif base_year and sim_year and abs(base_year - sim_year) <= 5:
-            add("Close release era")
+            add(f"Close release period ({sim_year})")
 
-    for tag in sim_tags[:6]:
+    # 7. 태그 직접 매칭 — 구체적인 공통 태그
+    _SKIP_GENERIC = {"rock", "pop", "music", "korean", "song", "good", "alternative"}
+    for tag in sim_tags[:8]:
         tag_l = tag.lower()
+        if tag_l in _SKIP_GENERIC or len(tag_l) < 4:
+            continue
         if any(tag_l in bt or bt in tag_l for bt in base_tokens if len(bt) >= 4):
-            if len(tag) >= 4 and tag_l not in {"rock", "pop", "music", "korean"}:
-                add(_display_genre(tag))
+            add(f"Tagged: {_display_genre(tag)}")
 
-    if bd.get("listener", lastfm_match) >= 35:
-        add("Similar listener taste")
-    if map_sim >= 45 and bd.get("genre", 0) < 50:
-        add("Close on genre map")
+    # 8. 청취자 유사도
+    if bd.get("listener", lastfm_match) >= 40:
+        add("Frequently co-listened by fans")
+    if map_sim >= 50 and bd.get("genre", 0) < 50:
+        add("Positioned close on genre map")
 
     if not reasons and sim_genre_profile.get("primary_genre"):
-        add(_display_genre(sim_genre_profile["primary_genre"]))
+        add(f"Genre: {_display_genre(sim_genre_profile['primary_genre'])}")
 
     return reasons[:4]
 
