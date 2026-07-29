@@ -9,16 +9,12 @@
 
 ## 작동 원리 & 코드 설명
 
-전체 파이프라인과 파일별 코드 설명은 아래 문서를 보세요.
+| 문서 | 내용 |
+|------|------|
+| **[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md)** | End-to-End 흐름, 알고리즘(관련도·장르 맵·코사인), 배포 |
+| **[docs/CODE_WALKTHROUGH.md](docs/CODE_WALKTHROUGH.md)** | **디렉터리 파일 하나하나** 역할·함수·설정 설명 |
 
-**→ [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md)**
-
-포함 내용:
-
-- End-to-End 사용자 흐름 (검색 → 분석 → 추천)
-- 백엔드·프론트 디렉터리 / 파일별 역할
-- 장르 맵·관련도·코사인 유사도 알고리즘
-- 로컬 실행·Render 배포
+추천 읽기 순서: `HOW_IT_WORKS` → `CODE_WALKTHROUGH`.
 
 ## 기능
 

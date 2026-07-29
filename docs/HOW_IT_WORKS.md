@@ -2,6 +2,8 @@
 
 이 문서는 **Music Explorer**가 어떻게 동작하는지, 주요 파일이 무엇을 하는지 처음부터 끝까지 설명합니다.
 
+파일 단위로 더 자세히 보려면 **[CODE_WALKTHROUGH.md](CODE_WALKTHROUGH.md)** 를 참고하세요.
+
 - 저장소: https://github.com/minjaekim26/music
 - 라이브: https://music-ydqz.onrender.com
 - 스택: **FastAPI (Python)** + **React + Vite + Tailwind**
