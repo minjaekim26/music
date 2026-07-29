@@ -8,7 +8,10 @@ export default function Hero() {
           🎧
         </span>
         <span className="inline">Discover your next </span>
-        <span className="inline-block pb-1 bg-gradient-to-r from-accent to-glow bg-clip-text text-transparent">
+        <span
+          className="inline-block bg-gradient-to-r from-accent to-glow bg-clip-text text-transparent"
+          style={{ paddingBottom: "0.2em", lineHeight: 1.4 }}
+        >
           favorite song
         </span>
       </h1>
