@@ -763,6 +763,180 @@ _FEATURE_REASON_RULES: list[tuple[tuple[str, ...], str]] = [
     (("lo-fi", "lofi"), "Lo-fi texture"),
 ]
 
+SIMILARITY_WEIGHTS: dict[str, float] = {
+    "genre": 0.32,
+    "mood": 0.18,
+    "tempo": 0.14,
+    "artist": 0.16,
+    "era": 0.12,
+    "listener": 0.08,
+}
+
+
+def _parse_year(value: str | int | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value if 1900 <= value <= 2100 else None
+    match = re.search(r"(19|20)\d{2}", str(value))
+    if not match:
+        return None
+    year = int(match.group(0))
+    return year if 1900 <= year <= 2100 else None
+
+
+def _era_label(year: int | None) -> str | None:
+    if not year:
+        return None
+    decade = (year // 10) * 10
+    return f"{decade}s"
+
+
+def _list_overlap_score(items_a: list[str], items_b: list[str]) -> float:
+    set_a = {x.lower().strip() for x in items_a if x and x.strip()}
+    set_b = {x.lower().strip() for x in items_b if x and x.strip()}
+    if not set_a or not set_b:
+        return 0.0
+    inter = len(set_a & set_b)
+    union = len(set_a | set_b)
+    return round((inter / union) * 100, 1) if union else 0.0
+
+
+def _tempo_bucket(
+    moods: list[str],
+    styles: list[str],
+    duration_ms: int | None,
+) -> str | None:
+    tokens = _reason_tokens(moods, styles)
+    if any(k in tokens for k in ("slow", "ballad", "downtempo", "lento")):
+        return "slow"
+    if any(k in tokens for k in ("fast", "uptempo", "upbeat", "energetic", "aggressive")):
+        return "fast"
+    if duration_ms:
+        if duration_ms >= 300_000:
+            return "slow"
+        if duration_ms <= 165_000:
+            return "fast"
+    if tokens:
+        return "mid"
+    return None
+
+
+def _tempo_similarity(
+    base_bucket: str | None,
+    sim_bucket: str | None,
+    base_ms: int | None,
+    sim_ms: int | None,
+) -> float:
+    if base_bucket and sim_bucket:
+        if base_bucket == sim_bucket:
+            return 92.0
+        adjacent = {("slow", "mid"), ("mid", "fast")}
+        if (base_bucket, sim_bucket) in adjacent or (sim_bucket, base_bucket) in adjacent:
+            return 62.0
+        return 35.0
+    if base_ms and sim_ms and base_ms > 0 and sim_ms > 0:
+        ratio = min(base_ms, sim_ms) / max(base_ms, sim_ms)
+        return round(ratio * 75.0, 1)
+    return 50.0
+
+
+def _era_similarity(base_year: int | None, sim_year: int | None) -> float:
+    if not base_year or not sim_year:
+        return 50.0
+    diff = abs(base_year - sim_year)
+    if diff <= 2:
+        return 100.0
+    if diff <= 5:
+        return 88.0
+    if diff <= 10:
+        return 72.0
+    if diff <= 20:
+        return 55.0
+    return max(20.0, round(100.0 - diff * 1.8, 1))
+
+
+def _artist_similarity(
+    base_artist: str,
+    sim_artist: str,
+    base_artist_tags: list[str],
+    sim_artist_tags: list[str],
+) -> float:
+    if not sim_artist:
+        return 0.0
+    if base_artist.strip().lower() == sim_artist.strip().lower():
+        return 100.0
+
+    name_sim = _token_overlap(base_artist, sim_artist) * 100
+    tag_sim = _list_overlap_score(base_artist_tags, sim_artist_tags)
+    return round(min(100.0, max(name_sim, tag_sim * 0.9)), 1)
+
+
+def _compute_similarity_breakdown(
+    *,
+    base_genres: list[str],
+    base_moods: list[str],
+    base_styles: list[str],
+    base_tags: list[str],
+    base_profile: dict,
+    base_artist: str,
+    base_year: int | None,
+    base_duration_ms: int | None,
+    base_artist_tags: list[str],
+    sim_tags: list[str],
+    sim_moods: list[str],
+    sim_styles: list[str],
+    sim_profile: dict,
+    sim_artist: str,
+    sim_year: int | None,
+    sim_duration_ms: int | None,
+    sim_artist_tags: list[str],
+    lastfm_match: float = 0.0,
+    source_genre: str | None = None,
+) -> dict[str, float]:
+    genre_vector = genre_similarity_between(base_tags, sim_tags) if sim_tags else 0.0
+    map_sim = 0.0
+    if sim_profile.get("position") and base_profile.get("position"):
+        map_sim = map_distance_similarity(base_profile["position"], sim_profile["position"])
+    genre_score = round(min(100.0, genre_vector * 0.72 + map_sim * 0.28), 1)
+
+    if source_genre:
+        genre_score = max(genre_score, genre_similarity_between(base_tags, [source_genre]))
+
+    mood_score = _list_overlap_score(base_moods, sim_moods)
+    if mood_score < 40:
+        mood_score = max(mood_score, _list_overlap_score(base_styles, sim_styles) * 0.85)
+
+    base_tempo = _tempo_bucket(base_moods, base_styles, base_duration_ms)
+    sim_tempo = _tempo_bucket(sim_moods, sim_styles, sim_duration_ms)
+    tempo_score = _tempo_similarity(base_tempo, sim_tempo, base_duration_ms, sim_duration_ms)
+
+    artist_score = _artist_similarity(base_artist, sim_artist, base_artist_tags, sim_artist_tags)
+    era_score = _era_similarity(base_year, sim_year)
+    listener_score = float(lastfm_match or 0)
+
+    overall = 0.0
+    for key, weight in SIMILARITY_WEIGHTS.items():
+        value = {
+            "genre": genre_score,
+            "mood": mood_score,
+            "tempo": tempo_score,
+            "artist": artist_score,
+            "era": era_score,
+            "listener": listener_score,
+        }[key]
+        overall += value * weight
+
+    return {
+        "genre": genre_score,
+        "mood": round(mood_score, 1),
+        "tempo": round(tempo_score, 1),
+        "artist": artist_score,
+        "era": round(era_score, 1),
+        "listener": round(listener_score, 1),
+        "overall": round(min(100.0, overall), 1),
+    }
+
 
 def _display_genre(name: str) -> str:
     return " ".join(part.capitalize() for part in name.split())
@@ -780,6 +954,13 @@ def _build_recommendation_reasons(
     map_sim: float = 0.0,
     source_genre: str | None = None,
     matched_keywords: list[str] | None = None,
+    breakdown: dict[str, float] | None = None,
+    base_year: int | None = None,
+    sim_year: int | None = None,
+    base_tempo: str | None = None,
+    sim_tempo: str | None = None,
+    sim_moods: list[str] | None = None,
+    sim_styles: list[str] | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     seen: set[str] = set()
@@ -794,22 +975,57 @@ def _build_recommendation_reasons(
     sim_genre_names = [g.get("name", "") for g in sim_genre_profile.get("genres", []) if g.get("name")]
     sim_genre_lower = {n.lower() for n in sim_genre_names}
 
-    for genre in base_genres:
-        if genre.lower() in sim_genre_lower:
-            add(_display_genre(genre))
+    bd = breakdown or {}
 
-    if source_genre:
+    if bd.get("genre", 0) >= 50:
+        matched_genre = False
+        for genre in base_genres:
+            if genre.lower() in sim_genre_lower:
+                add(_display_genre(genre))
+                matched_genre = True
+                break
+        if not matched_genre and sim_genre_profile.get("primary_genre"):
+            add(_display_genre(sim_genre_profile["primary_genre"]))
+
+    if source_genre and bd.get("genre", 0) >= 40:
         add(_display_genre(source_genre))
 
     for keyword in matched_keywords or []:
         add(_display_genre(keyword) if " " in keyword else keyword.capitalize())
 
     base_tokens = _reason_tokens(base_genres, base_moods, base_styles, base_tags)
-    sim_tokens = _reason_tokens(sim_tags, sim_genre_names, [], [])
+    sim_tokens = _reason_tokens(sim_tags, sim_genre_names, sim_moods or [], sim_styles or [])
 
-    for keywords, label in _FEATURE_REASON_RULES:
-        if any(k in base_tokens for k in keywords) and any(k in sim_tokens for k in keywords):
-            add(label)
+    if bd.get("mood", 0) >= 45:
+        for keywords, label in _FEATURE_REASON_RULES:
+            if any(k in base_tokens for k in keywords) and any(k in sim_tokens for k in keywords):
+                if "tempo" not in label.lower() and "guitar" not in label.lower() and "piano" not in label.lower() and "synth" not in label.lower():
+                    add(label)
+
+    if bd.get("tempo", 0) >= 50:
+        tempo_labels = {
+            "slow": "Slow tempo",
+            "mid": "Mid tempo",
+            "fast": "Upbeat tempo",
+        }
+        if base_tempo and sim_tempo and base_tempo == sim_tempo:
+            add(tempo_labels.get(base_tempo, "Similar tempo"))
+        else:
+            for keywords, label in _FEATURE_REASON_RULES:
+                if "tempo" in label.lower() or label in ("Upbeat tempo", "Mid tempo"):
+                    if any(k in base_tokens for k in keywords) and any(k in sim_tokens for k in keywords):
+                        add(label)
+
+    if bd.get("artist", 0) >= 65:
+        add("Similar artist style")
+
+    if bd.get("era", 0) >= 65:
+        base_era = _era_label(base_year)
+        sim_era = _era_label(sim_year)
+        if base_era and sim_era and base_era == sim_era:
+            add(f"Same era ({base_era})")
+        elif base_year and sim_year and abs(base_year - sim_year) <= 5:
+            add("Close release era")
 
     for tag in sim_tags[:6]:
         tag_l = tag.lower()
@@ -817,9 +1033,9 @@ def _build_recommendation_reasons(
             if len(tag) >= 4 and tag_l not in {"rock", "pop", "music", "korean"}:
                 add(_display_genre(tag))
 
-    if lastfm_match >= 35:
+    if bd.get("listener", lastfm_match) >= 35:
         add("Similar listener taste")
-    if map_sim >= 45:
+    if map_sim >= 45 and bd.get("genre", 0) < 50:
         add("Close on genre map")
 
     if not reasons and sim_genre_profile.get("primary_genre"):
@@ -843,18 +1059,26 @@ async def _enrich_similar_track(
     base_genres: list[str] | None = None,
     base_moods: list[str] | None = None,
     base_styles: list[str] | None = None,
+    base_artist: str = "",
+    base_year: int | None = None,
+    base_duration_ms: int | None = None,
+    base_artist_tags: list[str] | None = None,
     source_genre: str | None = None,
     matched_keywords: list[str] | None = None,
 ) -> dict:
     artist = track.get("artist", "")
     title = track.get("title", "")
 
-    adb_track, adb_artist, dz = await asyncio.gather(
+    adb_track, adb_artist, dz, sim_lf_artist_tags = await asyncio.gather(
         adb_search_track(client, artist, title),
         search_artist(client, artist),
         _find_deezer_track(client, title, artist),
+        get_artist_top_tags(client, artist),
         return_exceptions=True,
     )
+
+    if isinstance(sim_lf_artist_tags, Exception):
+        sim_lf_artist_tags = []
 
     sim_tags = []
     sim_moods: list[str] = []
@@ -886,8 +1110,38 @@ async def _enrich_similar_track(
     if track_profile.get("position") and base_profile.get("position"):
         map_sim = map_distance_similarity(base_profile["position"], track_profile["position"])
 
-    lastfm_match = track.get("lastfm_match", 0.0)
-    combined = round(min(100.0, genre_sim * 0.55 + map_sim * 0.25 + lastfm_match * 0.2), 1)
+    lastfm_match = float(track.get("lastfm_match", 0.0) or 0.0)
+    sim_year = None
+    if isinstance(adb_track, dict):
+        sim_year = _parse_year(adb_track.get("intYearReleased"))
+    sim_duration_ms = int(dz.get("duration", 0) or 0) * 1000 if isinstance(dz, dict) else None
+    sim_artist_tag_names = [t.get("name", "") for t in sim_lf_artist_tags if isinstance(t, dict) and t.get("name")]
+
+    base_tempo = _tempo_bucket(base_moods or [], base_styles or [], base_duration_ms)
+    sim_tempo = _tempo_bucket(sim_moods, sim_styles, sim_duration_ms)
+
+    breakdown = _compute_similarity_breakdown(
+        base_genres=base_genres or [],
+        base_moods=base_moods or [],
+        base_styles=base_styles or [],
+        base_tags=base_tags,
+        base_profile=base_profile,
+        base_artist=base_artist,
+        base_year=base_year,
+        base_duration_ms=base_duration_ms,
+        base_artist_tags=base_artist_tags or [],
+        sim_tags=sim_tags,
+        sim_moods=sim_moods,
+        sim_styles=sim_styles,
+        sim_profile=track_profile,
+        sim_artist=artist,
+        sim_year=sim_year,
+        sim_duration_ms=sim_duration_ms,
+        sim_artist_tags=sim_artist_tag_names,
+        lastfm_match=lastfm_match,
+        source_genre=source_genre,
+    )
+    combined = breakdown["overall"]
 
     cover = track.get("cover")
     if isinstance(adb_track, dict) and adb_track.get("strTrackThumb"):
@@ -911,6 +1165,13 @@ async def _enrich_similar_track(
         map_sim=map_sim,
         source_genre=source_genre,
         matched_keywords=matched_keywords,
+        breakdown=breakdown,
+        base_year=base_year,
+        sim_year=sim_year,
+        base_tempo=base_tempo,
+        sim_tempo=sim_tempo,
+        sim_moods=sim_moods,
+        sim_styles=sim_styles,
     )
 
     return _attach_recommendation_reasons(
@@ -923,6 +1184,7 @@ async def _enrich_similar_track(
             "genre_similarity": genre_sim,
             "map_similarity": map_sim,
             "similarity": combined,
+            "similarity_breakdown": breakdown,
         },
         reasons,
     )
@@ -938,7 +1200,23 @@ def _finalize_genre_rec_item(
     source_genre: str | None = None,
 ) -> dict:
     """Boost similarity for tracks found via genre tag search."""
+    breakdown = item.get("similarity_breakdown") or {}
     map_sim = float(item.get("map_similarity") or 0)
+
+    if breakdown:
+        genre_score = float(breakdown.get("genre") or item.get("genre_similarity") or 0)
+        if source_genre:
+            genre_score = max(genre_score, GENRE_REC_TAG_BASELINE)
+        item["genre_similarity"] = genre_score
+        overall = float(breakdown.get("overall") or item.get("similarity") or 0)
+        if source_genre:
+            overall = min(100.0, max(overall, GENRE_REC_TAG_BASELINE * 0.75 + overall * 0.25))
+        item["similarity"] = round(overall, 1)
+        if breakdown:
+            breakdown["overall"] = item["similarity"]
+            breakdown["genre"] = round(genre_score, 1)
+            item["similarity_breakdown"] = breakdown
+        return item
 
     tag_sim = genre_similarity_between(base_tags, base_tags)
     if source_genre:
@@ -1096,6 +1374,8 @@ async def get_track_detail(
     primary_genres = [g["name"] for g in genre_profile.get("genres", [])[:8]]
     classification_tags = primary_genres or filter_leaf_genre_names(tag_list)
     base_moods, base_styles = _extract_mood_style(ui)
+    base_year = _parse_year(ui.get("release_year")) or _parse_year(release_date)
+    base_artist_tags = [t.get("name", "") for t in lf_artist_tags if isinstance(t, dict) and t.get("name")]
 
     similar_enriched = []
     for t in similar_raw[:12]:
@@ -1107,6 +1387,10 @@ async def get_track_detail(
             base_genres=primary_genres,
             base_moods=base_moods,
             base_styles=base_styles,
+            base_artist=lookup_artist,
+            base_year=base_year,
+            base_duration_ms=duration_ms,
+            base_artist_tags=base_artist_tags,
         )
         similar_enriched.append(enriched)
 
@@ -1589,8 +1873,12 @@ async def recommend_by_keywords(
             matched_keywords=matched_kw[:4] or cleaned[:hit_count],
         )
         item["keyword_hits"] = hit_count
-        item["genre_similarity"] = max(item.get("genre_similarity", 0), combined)
-        item["similarity"] = combined
+        kw_score = combined
+        blended = round(min(100.0, float(item.get("similarity", 0)) * 0.55 + kw_score * 0.45), 1)
+        item["genre_similarity"] = max(item.get("genre_similarity", 0), kw_score)
+        item["similarity"] = blended
+        if item.get("similarity_breakdown"):
+            item["similarity_breakdown"]["overall"] = blended
         enriched.append(item)
 
     matched = base_profile.get("genres", [])

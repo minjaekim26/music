@@ -1,6 +1,14 @@
 import React from "react";
 import { SimilarityBadge } from "./GenreBars.jsx";
 
+const BREAKDOWN_LABELS = {
+  genre: "Genre",
+  mood: "Mood",
+  tempo: "Tempo",
+  artist: "Artist",
+  era: "Era",
+};
+
 function Cover({ src, size = "md" }) {
   const sizes = {
     sm: "h-12 w-12 rounded-lg",
@@ -13,6 +21,34 @@ function Cover({ src, size = "md" }) {
     return <img src={src} alt="" className={`${cls} shrink-0 object-cover`} />;
   }
   return <div className={`${cls} shrink-0 bg-zinc-200 dark:bg-zinc-800`} />;
+}
+
+function SimilarityBreakdown({ breakdown }) {
+  if (!breakdown) return null;
+
+  const rows = Object.entries(BREAKDOWN_LABELS)
+    .map(([key, label]) => ({ key, label, value: breakdown[key] }))
+    .filter((row) => typeof row.value === "number" && row.value > 0);
+
+  if (!rows.length) return null;
+
+  return (
+    <div className="mt-2 space-y-1">
+      <p className="text-[10px] font-medium text-zinc-500 dark:text-zinc-400">유사도 기준</p>
+      {rows.map(({ key, label, value }) => (
+        <div key={key} className="flex items-center gap-2">
+          <span className="w-11 shrink-0 text-[10px] text-zinc-500 dark:text-zinc-400">{label}</span>
+          <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+            <div
+              className="h-full rounded-full bg-accent/80"
+              style={{ width: `${Math.min(100, value)}%` }}
+            />
+          </div>
+          <span className="w-8 shrink-0 text-right text-[10px] tabular-nums text-zinc-500">{Math.round(value)}%</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function TrackRecommendRow({ track, onSelect, showReason = false }) {
@@ -33,6 +69,10 @@ export function TrackRecommendRow({ track, onSelect, showReason = false }) {
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{track.title}</p>
         <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">{track.artist}</p>
+
+        {showReason && track.similarity_breakdown && (
+          <SimilarityBreakdown breakdown={track.similarity_breakdown} />
+        )}
 
         {showReason && reasons.length > 0 && (
           <div className="mt-2">
