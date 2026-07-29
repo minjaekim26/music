@@ -546,7 +546,7 @@ async def search_tracks(client: httpx.AsyncClient, query: str, limit: int = 12) 
             },
         }
 
-    fetch_limit = min(max(limit, 1), 50)
+    fetch_limit = min(max(limit, 1), 20)
     expansion = expand_search_queries(query)
     search_terms = list(expansion["queries"])
 

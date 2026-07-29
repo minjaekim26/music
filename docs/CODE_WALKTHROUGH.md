@@ -73,7 +73,7 @@ music/
 |--------|--------|---------|
 | `GET /api/health` | `health` | 상태 + Last.fm/Spotify/SC/YT 설정 여부 |
 | `GET /api/genre-map` | `genre_map` | Every Noise 노드 전체 |
-| `GET /api/search` | `search` | `q`, `limit`(1–50) → 검색 |
+| `GET /api/search` | `search` | `q`, `limit`(1–20) → 검색 |
 | `GET /api/track` | `track_detail` | mbid/deezer/sc/title+artist → 상세 |
 | `GET /api/recommend/genre` | `genre_recommendations` | 단일 장르 추천 |
 | `GET /api/recommend/genres` | `genres_recommendations` | 다중 장르 |

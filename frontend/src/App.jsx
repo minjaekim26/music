@@ -383,7 +383,7 @@ export default function App() {
     setSearchMeta(null);
 
     try {
-      const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(q)}&limit=50`);
+      const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(q)}&limit=20`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.detail || "검색에 실패했습니다.");

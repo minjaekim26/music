@@ -34,7 +34,7 @@
 
 ### 2.1 검색
 
-1. 프론트 `App.jsx`가 `GET /api/search?q=...&limit=50` 호출
+1. 프론트 `App.jsx`가 `GET /api/search?q=...&limit=20` 호출
 2. 백엔드 `search_tracks()`:
    - 한글 별칭·MusicBrainz로 검색어 확장
    - Last.fm / MusicBrainz / Deezer / Spotify / SoundCloud / YouTube Music을 **병렬** 조회
