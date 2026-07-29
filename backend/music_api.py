@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import math
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -718,11 +719,132 @@ def _source_label(source: str | None) -> str:
     return " · ".join(labels.get(s.strip(), s) for s in source.split("+") if s.strip())
 
 
+def _split_meta_parts(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [p.strip() for p in re.split(r"[,/|]+", value) if p.strip()]
+
+
+def _extract_mood_style(ui: dict | None) -> tuple[list[str], list[str]]:
+    if not ui:
+        return [], []
+    moods: list[str] = []
+    styles: list[str] = []
+    for field in ("track_mood", "artist_mood"):
+        moods.extend(_split_meta_parts(ui.get(field)))
+    for field in ("track_style", "artist_style"):
+        styles.extend(_split_meta_parts(ui.get(field)))
+    return moods, styles
+
+
+def _reason_tokens(*groups: list[str]) -> set[str]:
+    tokens: set[str] = set()
+    for group in groups:
+        for item in group:
+            norm = item.lower().strip()
+            if not norm:
+                continue
+            tokens.add(norm)
+            tokens.update(norm.replace("-", " ").split())
+    return tokens
+
+
+_FEATURE_REASON_RULES: list[tuple[tuple[str, ...], str]] = [
+    (("slow", "ballad", "downtempo", "lento"), "Slow tempo"),
+    (("mid-tempo", "medium"), "Mid tempo"),
+    (("fast", "uptempo", "upbeat", "energetic"), "Upbeat tempo"),
+    (("guitar",), "Similar guitar tone"),
+    (("piano",), "Piano-driven"),
+    (("synth", "synthesizer", "electronic"), "Synth-driven"),
+    (("vocal", "vocals", "singing"), "Strong vocals"),
+    (("emotional", "melancholy", "melancholic", "sad", "heartfelt"), "Emotional vocal"),
+    (("dreamy", "ethereal", "atmospheric"), "Dreamy atmosphere"),
+    (("aggressive", "intense", "raw"), "Intense energy"),
+    (("lo-fi", "lofi"), "Lo-fi texture"),
+]
+
+
+def _display_genre(name: str) -> str:
+    return " ".join(part.capitalize() for part in name.split())
+
+
+def _build_recommendation_reasons(
+    *,
+    base_genres: list[str],
+    base_moods: list[str],
+    base_styles: list[str],
+    base_tags: list[str],
+    sim_tags: list[str],
+    sim_genre_profile: dict,
+    lastfm_match: float = 0.0,
+    map_sim: float = 0.0,
+    source_genre: str | None = None,
+    matched_keywords: list[str] | None = None,
+) -> list[str]:
+    reasons: list[str] = []
+    seen: set[str] = set()
+
+    def add(reason: str) -> None:
+        key = reason.lower().strip()
+        if not key or key in seen:
+            return
+        seen.add(key)
+        reasons.append(reason)
+
+    sim_genre_names = [g.get("name", "") for g in sim_genre_profile.get("genres", []) if g.get("name")]
+    sim_genre_lower = {n.lower() for n in sim_genre_names}
+
+    for genre in base_genres:
+        if genre.lower() in sim_genre_lower:
+            add(_display_genre(genre))
+
+    if source_genre:
+        add(_display_genre(source_genre))
+
+    for keyword in matched_keywords or []:
+        add(_display_genre(keyword) if " " in keyword else keyword.capitalize())
+
+    base_tokens = _reason_tokens(base_genres, base_moods, base_styles, base_tags)
+    sim_tokens = _reason_tokens(sim_tags, sim_genre_names, [], [])
+
+    for keywords, label in _FEATURE_REASON_RULES:
+        if any(k in base_tokens for k in keywords) and any(k in sim_tokens for k in keywords):
+            add(label)
+
+    for tag in sim_tags[:6]:
+        tag_l = tag.lower()
+        if any(tag_l in bt or bt in tag_l for bt in base_tokens if len(bt) >= 4):
+            if len(tag) >= 4 and tag_l not in {"rock", "pop", "music", "korean"}:
+                add(_display_genre(tag))
+
+    if lastfm_match >= 35:
+        add("Similar listener taste")
+    if map_sim >= 45:
+        add("Close on genre map")
+
+    if not reasons and sim_genre_profile.get("primary_genre"):
+        add(_display_genre(sim_genre_profile["primary_genre"]))
+
+    return reasons[:4]
+
+
+def _attach_recommendation_reasons(item: dict, reasons: list[str]) -> dict:
+    item["reasons"] = reasons
+    item["reason"] = reasons[0] if reasons else item.get("reason", "")
+    return item
+
+
 async def _enrich_similar_track(
     client: httpx.AsyncClient,
     track: dict,
     base_tags: list[str],
     base_profile: dict,
+    *,
+    base_genres: list[str] | None = None,
+    base_moods: list[str] | None = None,
+    base_styles: list[str] | None = None,
+    source_genre: str | None = None,
+    matched_keywords: list[str] | None = None,
 ) -> dict:
     artist = track.get("artist", "")
     title = track.get("title", "")
@@ -735,16 +857,28 @@ async def _enrich_similar_track(
     )
 
     sim_tags = []
+    sim_moods: list[str] = []
+    sim_styles: list[str] = []
     if isinstance(adb_track, dict):
         for field in ("strGenre", "strStyle", "strMood"):
             val = adb_track.get(field)
             if val:
-                sim_tags.extend([p.strip() for p in val.replace("/", ",").split(",") if p.strip()])
+                parts = [p.strip() for p in val.replace("/", ",").split(",") if p.strip()]
+                sim_tags.extend(parts)
+                if field == "strMood":
+                    sim_moods.extend(parts)
+                elif field == "strStyle":
+                    sim_styles.extend(parts)
     if isinstance(adb_artist, dict):
-        for field in ("strGenre", "strStyle"):
+        for field in ("strGenre", "strStyle", "strMood"):
             val = adb_artist.get(field)
             if val:
-                sim_tags.extend([p.strip() for p in val.replace("/", ",").split(",") if p.strip()])
+                parts = [p.strip() for p in val.replace("/", ",").split(",") if p.strip()]
+                sim_tags.extend(parts)
+                if field == "strMood":
+                    sim_moods.extend(parts)
+                elif field == "strStyle":
+                    sim_styles.extend(parts)
 
     genre_sim = genre_similarity_between(base_tags, sim_tags) if sim_tags else 0.0
     track_profile = build_genre_profile(sim_tags) if sim_tags else {"position": None}
@@ -766,16 +900,32 @@ async def _enrich_similar_track(
     if isinstance(dz, dict):
         duration = _format_ms(dz.get("duration", 0) * 1000)
 
-    return {
-        **track,
-        "cover": cover,
-        "preview": preview,
-        "duration": duration,
-        "deezer_id": dz.get("id") if isinstance(dz, dict) else None,
-        "genre_similarity": genre_sim,
-        "map_similarity": map_sim,
-        "similarity": combined,
-    }
+    reasons = _build_recommendation_reasons(
+        base_genres=base_genres or [],
+        base_moods=base_moods or [],
+        base_styles=base_styles or [],
+        base_tags=base_tags,
+        sim_tags=sim_tags,
+        sim_genre_profile=track_profile,
+        lastfm_match=lastfm_match,
+        map_sim=map_sim,
+        source_genre=source_genre,
+        matched_keywords=matched_keywords,
+    )
+
+    return _attach_recommendation_reasons(
+        {
+            **track,
+            "cover": cover,
+            "preview": preview,
+            "duration": duration,
+            "deezer_id": dz.get("id") if isinstance(dz, dict) else None,
+            "genre_similarity": genre_sim,
+            "map_similarity": map_sim,
+            "similarity": combined,
+        },
+        reasons,
+    )
 
 
 GENRE_REC_TAG_BASELINE = 55.0
@@ -945,10 +1095,19 @@ async def get_track_detail(
 
     primary_genres = [g["name"] for g in genre_profile.get("genres", [])[:8]]
     classification_tags = primary_genres or filter_leaf_genre_names(tag_list)
+    base_moods, base_styles = _extract_mood_style(ui)
 
     similar_enriched = []
     for t in similar_raw[:12]:
-        enriched = await _enrich_similar_track(client, t, classification_tags, genre_profile)
+        enriched = await _enrich_similar_track(
+            client,
+            t,
+            classification_tags,
+            genre_profile,
+            base_genres=primary_genres,
+            base_moods=base_moods,
+            base_styles=base_styles,
+        )
         similar_enriched.append(enriched)
 
     similar_enriched.sort(key=lambda x: x.get("similarity", 0), reverse=True)
@@ -1156,8 +1315,14 @@ async def recommend_by_genre(
 
     enriched = []
     for track in unique[:limit]:
-        item = await _enrich_similar_track(client, track, base_tags, genre_profile)
-        item["reason"] = f"{genre} 장르 추천"
+        item = await _enrich_similar_track(
+            client,
+            track,
+            base_tags,
+            genre_profile,
+            base_genres=[genre],
+            source_genre=genre,
+        )
         _finalize_genre_rec_item(item, base_tags, source_genre=genre)
         enriched.append(item)
 
@@ -1233,8 +1398,19 @@ async def recommend_by_genres(
 
     enriched: list[dict] = []
     for track in unique[:limit]:
-        item = await _enrich_similar_track(client, track, base_tags, base_profile)
-        item["reason"] = "선택 장르 기반 추천"
+        item = await _enrich_similar_track(
+            client,
+            track,
+            base_tags,
+            base_profile,
+            base_genres=cleaned,
+            source_genre=cleaned[0] if len(cleaned) == 1 else None,
+        )
+        if len(cleaned) > 1 and not item.get("reasons"):
+            item = _attach_recommendation_reasons(
+                item,
+                [_display_genre(g) for g in cleaned[:3]],
+            )
         _finalize_genre_rec_item(item, base_tags)
         enriched.append(item)
 
@@ -1398,8 +1574,20 @@ async def recommend_by_keywords(
 
     enriched: list[dict] = []
     for track, combined, hit_count in scored[:limit]:
-        item = await _enrich_similar_track(client, track, base_tags, base_profile)
-        item["reason"] = f"키워드 {hit_count}/{len(cleaned)} 매칭"
+        matched_kw = []
+        blob = f"{track.get('title', '')} {track.get('artist', '')} {track.get('source_keyword', '')}".lower()
+        for k in cleaned:
+            if k.lower() in blob:
+                matched_kw.append(k)
+
+        item = await _enrich_similar_track(
+            client,
+            track,
+            base_tags,
+            base_profile,
+            base_genres=[g.get("name", "") for g in base_profile.get("genres", [])[:6]],
+            matched_keywords=matched_kw[:4] or cleaned[:hit_count],
+        )
         item["keyword_hits"] = hit_count
         item["genre_similarity"] = max(item.get("genre_similarity", 0), combined)
         item["similarity"] = combined
