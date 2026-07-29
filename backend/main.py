@@ -58,7 +58,7 @@ async def genre_map():
 async def search(q: str = Query(..., min_length=1), limit: int = 12):
     async with httpx.AsyncClient() as client:
         try:
-            payload = await search_tracks(client, q, limit=min(max(limit, 1), 50))
+            payload = await search_tracks(client, q, limit=min(max(limit, 1), 20))
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=f"음악 API 요청 실패: {exc}") from exc
     return {"query": q, **payload}
