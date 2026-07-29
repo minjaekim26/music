@@ -73,9 +73,25 @@ async def _mb_get(
         _last_mb_request = time.monotonic()
 
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    resp = await client.get(f"{MB_BASE}{path}", params=params, headers=headers, timeout=20.0)
+    try:
+        resp = await client.get(f"{MB_BASE}{path}", params=params, headers=headers, timeout=20.0)
+    except httpx.TransportError:
+        return None
     if resp.status_code == 404 and not_found_ok:
         return None
+    # 5xx: MusicBrainz 일시 장애 — 조용히 폴백
+    if resp.status_code >= 500:
+        return None
+    # 429: rate-limit — 잠시 대기 후 한 번 재시도
+    if resp.status_code == 429:
+        retry_after = int(resp.headers.get("Retry-After", "2"))
+        await asyncio.sleep(min(retry_after, 10))
+        try:
+            resp = await client.get(f"{MB_BASE}{path}", params=params, headers=headers, timeout=20.0)
+        except httpx.TransportError:
+            return None
+        if resp.status_code != 200:
+            return None
     resp.raise_for_status()
     return resp.json()
 
@@ -1050,6 +1066,73 @@ def _attach_recommendation_reasons(item: dict, reasons: list[str]) -> dict:
     return item
 
 
+def _build_genre_tags(
+    sim_tags: list[str],
+    track_profile: dict,
+    *,
+    matched_keywords: list[str] | None = None,
+    source_keyword: str | None = None,
+) -> list[str]:
+    tags: list[str] = []
+    seen: set[str] = set()
+
+    def add(tag: str) -> None:
+        text = (tag or "").strip()
+        if not text:
+            return
+        key = text.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        tags.append(text)
+
+    for genre in track_profile.get("genres", [])[:4]:
+        if isinstance(genre, dict):
+            add(genre.get("name", ""))
+    for tag in sim_tags:
+        add(tag)
+        if len(tags) >= 6:
+            return tags[:6]
+    if matched_keywords:
+        for kw in matched_keywords:
+            add(kw)
+            if len(tags) >= 6:
+                return tags[:6]
+    if source_keyword:
+        add(source_keyword)
+    return tags[:6]
+
+
+def _build_streaming_links(track: dict) -> tuple[str, str]:
+    from urllib.parse import quote
+
+    artist = (track.get("artist") or "").strip()
+    title = (track.get("title") or "").strip()
+    search_q = quote(f"{artist} {title}".strip())
+
+    spotify_id = track.get("spotify_id")
+    if spotify_id:
+        spotify_url = f"https://open.spotify.com/track/{spotify_id}"
+    else:
+        external = track.get("external_url") or ""
+        if "spotify.com" in external:
+            spotify_url = external
+        else:
+            spotify_url = f"https://open.spotify.com/search/{search_q}"
+
+    video_id = track.get("yt_video_id")
+    if video_id:
+        youtube_url = f"https://www.youtube.com/watch?v={video_id}"
+    else:
+        external = track.get("external_url") or ""
+        if "youtube.com" in external or "youtu.be" in external:
+            youtube_url = external
+        else:
+            youtube_url = f"https://www.youtube.com/results?search_query={search_q}"
+
+    return spotify_url, youtube_url
+
+
 async def _enrich_similar_track(
     client: httpx.AsyncClient,
     track: dict,
@@ -1174,6 +1257,14 @@ async def _enrich_similar_track(
         sim_styles=sim_styles,
     )
 
+    genre_tags = _build_genre_tags(
+        sim_tags,
+        track_profile,
+        matched_keywords=matched_keywords,
+        source_keyword=track.get("source_keyword"),
+    )
+    spotify_url, youtube_url = _build_streaming_links(track)
+
     return _attach_recommendation_reasons(
         {
             **track,
@@ -1181,6 +1272,9 @@ async def _enrich_similar_track(
             "preview": preview,
             "duration": duration,
             "deezer_id": dz.get("id") if isinstance(dz, dict) else None,
+            "genre_tags": genre_tags,
+            "spotify_url": spotify_url,
+            "youtube_url": youtube_url,
             "genre_similarity": genre_sim,
             "map_similarity": map_sim,
             "similarity": combined,

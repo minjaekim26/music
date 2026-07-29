@@ -2,10 +2,13 @@ import React, { useEffect, useRef, useState } from "react";
 import GenreMap from "./components/GenreMap.jsx";
 import GenreBars from "./components/GenreBars.jsx";
 import GenreExplorer from "./components/GenreExplorer.jsx";
-import KeywordRecommend from "./components/KeywordRecommend.jsx";
 import HelpPanel from "./components/HelpPanel.jsx";
+import Hero from "./components/Hero.jsx";
+import LoadingSteps from "./components/LoadingSteps.jsx";
+import { TasteProfileCard } from "./components/TasteProfileCard.jsx";
 import { TrackRecommendList } from "./components/TrackRecommendList.jsx";
 import { PaginationBar, usePagination } from "./components/Pagination.jsx";
+import { classifySearchQuery } from "./utils/searchIntent.js";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
@@ -135,10 +138,7 @@ function TrackDetail({
   if (loading) {
     return (
       <div className="flex min-h-[420px] items-center justify-center rounded-3xl border border-zinc-900/10 bg-white shadow-sm dark:border-white/10 dark:bg-white/5">
-        <div className="flex flex-col items-center gap-3 text-zinc-500 dark:text-zinc-400">
-          <div className="h-10 w-10 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-          <p className="text-sm">음악 DB에서 분석 중...</p>
-        </div>
+        <LoadingSteps active />
       </div>
     );
   }
@@ -302,8 +302,13 @@ export default function App() {
   const [homeKey, setHomeKey] = useState(0);
   const [backendOk, setBackendOk] = useState(true);
   const [searchMeta, setSearchMeta] = useState(null);
+  const [searchIntent, setSearchIntent] = useState(null);
+  const [recResult, setRecResult] = useState(null);
+  const [tasteProfile, setTasteProfile] = useState(null);
+  const [recLoading, setRecLoading] = useState(false);
 
   const searchPagination = usePagination(results);
+  const recPagination = usePagination(recResult?.tracks || []);
   const pickedRecPagination = usePagination(pickedGenreRecs);
   const detailRecTracks =
     genreRecommendations.length > 0 ? genreRecommendations : detail?.similar_tracks || [];
@@ -325,6 +330,10 @@ export default function App() {
     setPickedGenreRecs([]);
     setLoadingPickedRecs(false);
     setHelpOpen(false);
+    setSearchIntent(null);
+    setRecResult(null);
+    setTasteProfile(null);
+    setRecLoading(false);
     setHomeKey((k) => k + 1);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -374,28 +383,61 @@ export default function App() {
     const q = query.trim();
     if (!q) return;
 
+    const intent = classifySearchQuery(q);
+    setSearchIntent(intent);
     setSearching(true);
+    setRecLoading(intent.primary !== "catalog");
     setError("");
     setDetail(null);
     setSelected(null);
     setSelectedGenre(null);
     setGenreRecommendations([]);
     setSearchMeta(null);
+    setResults([]);
+    setRecResult(null);
+    setTasteProfile(null);
 
     try {
-      const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(q)}&limit=20`);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.detail || "검색에 실패했습니다.");
-      }
-      setResults(
-        (data.results || [])
+      if (intent.primary === "catalog") {
+        const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(q)}&limit=20`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail || "검색에 실패했습니다.");
+        }
+        const filtered = (data.results || [])
           .filter((t) => (t.relevance ?? 0) > 0)
-          .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0)),
-      );
-      setSearchMeta(data.meta || null);
-      if (!data.results?.length) {
-        setError(`검색 결과가 없습니다. ${searchEmptyHint(data.meta, q)}`);
+          .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0));
+        setResults(filtered);
+        setSearchMeta(data.meta || null);
+        if (!filtered.length) {
+          setError(`검색 결과가 없습니다. ${searchEmptyHint(data.meta, q)}`);
+        }
+      } else if (intent.primary === "taste") {
+        const res = await fetch(
+          `${API_BASE}/api/recommend/taste?${new URLSearchParams({ query: q, limit: "30" })}`,
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail || "취향 추천에 실패했습니다.");
+        }
+        setTasteProfile(data.taste_profile || null);
+        setRecResult(data);
+        if (!data.tracks?.length) {
+          setError("추천 결과가 없습니다. 다른 표현으로 다시 검색해 보세요.");
+        }
+      } else if (intent.primary === "keywords") {
+        const params = new URLSearchParams();
+        intent.keywords.forEach((k) => params.append("keywords", k));
+        params.set("limit", "30");
+        const res = await fetch(`${API_BASE}/api/recommend/keywords?${params}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail || "키워드 추천에 실패했습니다.");
+        }
+        setRecResult(data);
+        if (!data.tracks?.length) {
+          setError("추천 결과가 없습니다. 다른 키워드로 다시 검색해 보세요.");
+        }
       }
     } catch (err) {
       const msg = err.message || "검색 중 오류가 발생했습니다.";
@@ -405,8 +447,11 @@ export default function App() {
         setError(msg);
       }
       setResults([]);
+      setRecResult(null);
+      setTasteProfile(null);
     } finally {
       setSearching(false);
+      setRecLoading(false);
     }
   }
 
@@ -525,11 +570,11 @@ export default function App() {
 
   return (
     <div className="mx-auto min-h-screen max-w-6xl px-4 py-6 md:px-8 md:py-10">
-      <header className="relative mb-8 flex min-h-10 items-center justify-end">
+      <header className="mb-2 flex items-center justify-between">
         <button
           type="button"
           onClick={resetHome}
-          className="absolute left-1/2 -translate-x-1/2 font-display text-xl font-bold tracking-tight text-zinc-900 transition hover:text-accent dark:text-white dark:hover:text-accent"
+          className="font-display text-lg font-bold tracking-tight text-zinc-900 transition hover:text-accent dark:text-white dark:hover:text-accent"
         >
           distribution
         </button>
@@ -564,6 +609,8 @@ export default function App() {
         </div>
       )}
 
+      <Hero />
+
       <div className="mx-auto max-w-2xl space-y-3">
         <div className="overflow-hidden rounded-2xl border border-zinc-900/10 bg-white shadow-sm dark:border-white/10 dark:bg-white/5">
           <form onSubmit={handleSearch} className="p-2">
@@ -572,18 +619,35 @@ export default function App() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="곡 · 아티스트 검색"
+                placeholder="곡, 아티스트, 키워드, 취향 자연어 검색"
                 className="flex-1 bg-transparent px-3 py-2.5 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-white dark:placeholder:text-zinc-500"
               />
               <button
                 type="submit"
-                disabled={searching}
+                disabled={searching || recLoading}
                 className="rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-accent"
               >
-                {searching ? "…" : "검색"}
+                {searching || recLoading ? "…" : "검색"}
               </button>
             </div>
           </form>
+
+          {searchIntent && (
+            <p className="border-t border-zinc-900/10 px-3 py-1.5 text-[11px] text-zinc-500 dark:border-white/10">
+              <span className="text-zinc-400">해석:</span>{" "}
+              <span className="text-zinc-700 dark:text-zinc-300">{searchIntent.label}</span>
+            </p>
+          )}
+
+          <TasteProfileCard profile={tasteProfile} />
+
+          {(searching || recLoading) && (
+            <LoadingSteps
+              active={searching || recLoading}
+              compact
+              className="border-t border-zinc-900/10 dark:border-white/10"
+            />
+          )}
 
           {searchMeta?.query_expanded?.length > 0 && (
             <p className="border-t border-zinc-900/10 px-3 py-2 text-[11px] text-zinc-500 dark:border-white/10">
@@ -596,7 +660,7 @@ export default function App() {
 
           {results.length > 0 && (
             <div className="border-t border-zinc-900/10 dark:border-white/10">
-              <p className="px-3 py-1.5 text-[11px] text-zinc-400">정확도 높은 순</p>
+              <p className="px-3 py-1.5 text-[11px] text-zinc-400">곡 · 아티스트 · 정확도순</p>
               <div className="space-y-1.5 px-2">
                 {searchPagination.slice.map((item) => (
                   <SearchResult
@@ -615,16 +679,37 @@ export default function App() {
               />
             </div>
           )}
-        </div>
 
-        <KeywordRecommend key={homeKey} onSelectTrack={handleSimilarSelect} />
+          {(recResult?.tracks?.length > 0) && !searching && !recLoading && (
+            <div className="border-t border-zinc-900/10 dark:border-white/10">
+              <p className="px-3 py-1.5 text-[11px] text-zinc-400">추천 · 유사도순</p>
+              <div className="px-2 py-2">
+                <TrackRecommendList
+                  tracks={recPagination.slice}
+                  onSelect={handleSimilarSelect}
+                  showReason
+                />
+                <PaginationBar
+                  page={recPagination.page}
+                  totalPages={recPagination.totalPages}
+                  total={recPagination.total}
+                  onPageChange={recPagination.setPage}
+                />
+              </div>
+            </div>
+          )}
+        </div>
 
         {(pickedGenreRecs.length > 0 || loadingPickedRecs) && (
           <div className="overflow-hidden rounded-2xl border border-zinc-900/10 bg-white dark:border-white/10 dark:bg-white/5">
-            <p className="border-b border-zinc-900/10 px-4 py-2 text-xs font-medium text-zinc-500 dark:border-white/10">
-              {loadingPickedRecs ? "추천 불러오는 중…" : `장르 추천 · ${pickedGenres.join(", ")}`}
-            </p>
-            {pickedGenreRecs.length > 0 && (
+            {!loadingPickedRecs && (
+              <p className="border-b border-zinc-900/10 px-4 py-2 text-xs font-medium text-zinc-500 dark:border-white/10">
+                장르 추천 · {pickedGenres.join(", ")}
+              </p>
+            )}
+            {loadingPickedRecs ? (
+              <LoadingSteps active compact />
+            ) : (
               <div className="px-2 py-2">
                 <TrackRecommendList tracks={pickedRecPagination.slice} onSelect={handleSimilarSelect} showReason />
                 <PaginationBar
@@ -651,7 +736,7 @@ export default function App() {
             </p>
             <div className="px-2 py-2">
               {loadingGenreRecs ? (
-                <p className="py-4 text-center text-xs text-zinc-400">추천 계산 중…</p>
+                <LoadingSteps active compact />
               ) : (
                 <>
                   <TrackRecommendList
