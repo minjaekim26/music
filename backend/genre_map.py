@@ -29,7 +29,33 @@ EXTRA_ALIASES: dict[str, str] = {
     "indie": "indie rock",
     "lofi": "lo-fi",
     "lo fi": "lo-fi",
+    # hyperpop / digicore
+    "hyper pop": "hyperpop",
+    "hyper-pop": "hyperpop",
+    "digicore": "glitchcore",
+    "digi core": "glitchcore",
+    "digi-core": "glitchcore",
 }
+
+# 국가·언어만 있는 태그는 부분 문자열로 korean ost 등에 붙지 않게 함
+_VAGUE_TAGS = frozenset(
+    {
+        "korean",
+        "korea",
+        "japanese",
+        "japan",
+        "chinese",
+        "china",
+        "american",
+        "british",
+        "english",
+        "french",
+        "german",
+        "spanish",
+        "latin",
+        "asian",
+    }
+)
 
 
 @lru_cache(maxsize=1)
@@ -94,13 +120,41 @@ def _match_genre_id(tag: str) -> str | None:
         return alias[norm]
     if norm in by_id:
         return norm
+
+    # Korean / Japan 등 단독 태그는 명시 별칭 없으면 매칭 안 함 (korean ost 오매칭 방지)
+    if norm in _VAGUE_TAGS:
+        return None
+
+    candidates: list[tuple[int, int, str]] = []
+
+    def add_candidate(gid: str, score: int) -> None:
+        if gid in by_id:
+            candidates.append((score, len(gid), gid))
+
     for key, gid in alias.items():
-        if key in norm or norm in key:
-            return gid
+        if key == norm:
+            add_candidate(gid, 1000)
+            continue
+        if len(key) < 4 or len(norm) < 4:
+            continue
+        if key in norm:
+            add_candidate(gid, len(key) * 10 + (5 if f" {key} " in f" {norm} " else 0))
+        elif norm in key:
+            add_candidate(gid, len(key) * 10 + (5 if key.startswith(f"{norm} ") else 0))
+
     for gid in by_id:
-        if gid in norm or norm in gid:
-            return gid
-    return None
+        if len(gid) < 4 or len(norm) < 4:
+            continue
+        if gid in norm:
+            add_candidate(gid, len(gid) * 10)
+        elif norm in gid:
+            add_candidate(gid, len(gid) * 10 + (5 if gid.startswith(f"{norm} ") else 0))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: (-x[0], -x[1]))
+    return candidates[0][2]
 
 
 def _is_ancestor(ancestor_id: str, child_id: str, by_id: dict[str, dict[str, Any]]) -> bool:

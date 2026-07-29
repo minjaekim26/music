@@ -255,6 +255,37 @@ def _collect_tags(
     return tags, weights
 
 
+def _apply_genre_heuristics(tags: list[str], weights: list[float]) -> tuple[list[str], list[float]]:
+    """태그 조합으로 hyperpop·korean hyperpop 등을 보강 (Last.fm 메타가 부정확할 때)."""
+    if not tags:
+        return tags, weights
+
+    combined = " ".join(t.lower().strip() for t in tags)
+
+    def has(*needles: str) -> bool:
+        return any(n in combined for n in needles)
+
+    out_tags = list(tags)
+    out_weights = list(weights)
+
+    plugg = has("pluggnb", "plugg")
+    hyper = has("hyperpop", "hyper pop", "hyper-pop", "glitchcore", "digicore", "digi core")
+    korean = has("korean", "korea", "k-pop", "kpop", "k pop")
+
+    if plugg and korean and not hyper:
+        out_tags.extend(["korean hyperpop", "hyperpop"])
+        out_weights.extend([3.5, 3.0])
+    elif plugg and not hyper:
+        out_tags.append("hyperpop")
+        out_weights.append(2.5)
+
+    if has("digicore", "digi core", "digi-core") and not has("glitchcore"):
+        out_tags.append("glitchcore")
+        out_weights.append(2.0)
+
+    return out_tags, out_weights
+
+
 async def _infer_genre_tags_fallback(
     client: httpx.AsyncClient,
     artist: str,
@@ -865,6 +896,7 @@ async def get_track_detail(
                     isinstance(lf_info, dict) and lf_info.get("tags")
                 )
 
+    tag_list, tag_weights = _apply_genre_heuristics(tag_list, tag_weights)
     genre_profile = build_genre_profile(tag_list, tag_weights)
 
     adb_album = None
