@@ -26,6 +26,8 @@ from music_api import (
     search_tracks,
 )
 from taste_analysis import analyze_taste_query, is_llm_configured, profile_to_keywords
+import track_cache
+import openai_service
 
 
 class TasteAnalyzeBody(BaseModel):
@@ -35,6 +37,7 @@ class TasteAnalyzeBody(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """서버 시작 시 httpx 클라이언트 1개 생성, 종료 시 connection pool 정리."""
+    track_cache.init_db()
     app.state.http_client = httpx.AsyncClient(
         timeout=httpx.Timeout(20.0, connect=10.0),
         follow_redirects=True,
@@ -74,6 +77,7 @@ async def health():
         "ytmusic_authenticated": ytmusic_authenticated(),
         "youtube_api_configured": youtube_api_configured(),
         "llm_configured": is_llm_configured(),
+        "openai_configured": openai_service.is_configured(),
     }
 
 
@@ -194,7 +198,13 @@ async def keyword_recommendations(
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"음악 API 요청 실패: {exc}") from exc
 
-    return result
+    # GPT 추천 이유 생성 (실패해도 기존 result 는 그대로 반환)
+    user_query = " ".join(keywords)
+    recommendation_reason = await openai_service.generate_recommendation_reason(
+        client, user_query, result.get("tracks", [])
+    )
+
+    return {**result, "recommendation_reason": recommendation_reason}
 
 
 @app.post("/api/taste/analyze")
@@ -265,11 +275,17 @@ async def taste_recommendations(
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"음악 API 요청 실패: {exc}") from exc
 
+    # GPT 추천 이유 생성 (실패해도 기존 result 는 그대로 반환)
+    recommendation_reason = await openai_service.generate_recommendation_reason(
+        client, query, result.get("tracks", [])
+    )
+
     return {
         "query": query,
         "taste_profile": profile,
         "keywords_used": keywords,
         **result,
+        "recommendation_reason": recommendation_reason,
     }
 
 

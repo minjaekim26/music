@@ -44,6 +44,8 @@ from platform_search import (
 )
 from search_aliases import expand_search_queries, has_hangul, init_search_aliases_db
 from track_metadata import normalize_for_genre_lookup
+import embedding as emb
+import track_cache
 
 USER_AGENT = os.getenv(
     "MUSICBRAINZ_USER_AGENT",
@@ -2003,6 +2005,12 @@ async def recommend_by_keywords(
 
     scored.sort(key=lambda x: (x[1], x[2]), reverse=True)
 
+    # 쿼리 임베딩 생성 (OPENAI_API_KEY 미설정 시 None)
+    query_text = " ".join(cleaned)
+    query_embedding: list[float] | None = None
+    if emb.is_embedding_configured():
+        query_embedding = await emb.get_embedding(client, query_text)
+
     enriched: list[dict] = []
     for track, combined, hit_count in scored[:limit]:
         matched_kw = []
@@ -2021,6 +2029,31 @@ async def recommend_by_keywords(
         )
         item["keyword_hits"] = hit_count
         kw_score = combined
+
+        # 임베딩 유사도 블렌딩
+        if query_embedding is not None:
+            title = track.get("title", "")
+            artist = track.get("artist", "")
+            cache_key = track_cache.make_key(title, artist)
+            track_vec = track_cache.get_embedding_cache(cache_key)
+            if track_vec is None:
+                track_text = emb.build_track_text(
+                    title,
+                    artist,
+                    genre_tags=item.get("genre_tags") or [],
+                )
+                track_vec = await emb.get_embedding(client, track_text)
+                if track_vec is not None:
+                    track_cache.save_embedding_cache(
+                        cache_key,
+                        track_vec,
+                        {"title": title, "artist": artist},
+                    )
+            if track_vec is not None:
+                embed_sim = emb.cosine_similarity(query_embedding, track_vec) * 100
+                # 기존 점수 50% + 임베딩 유사도 50%
+                kw_score = round(min(100.0, kw_score * 0.5 + embed_sim * 0.5), 1)
+
         blended = round(min(100.0, float(item.get("similarity", 0)) * 0.55 + kw_score * 0.45), 1)
         item["genre_similarity"] = max(item.get("genre_similarity", 0), kw_score)
         item["similarity"] = blended

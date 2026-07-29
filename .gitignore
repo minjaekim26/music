@@ -6,5 +6,6 @@ frontend/dist/
 backend/.env
 backend/data/ytmusic*.json
 backend/data/search_aliases.db
+backend/data/track_cache.db
 *.pyc
 .cursor/
