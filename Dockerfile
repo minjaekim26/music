@@ -15,6 +15,12 @@ ENV SERVE_STATIC=1
 ENV HOST=0.0.0.0
 ENV PORT=8080
 
+# librosa / soundfile 가 필요로 하는 시스템 라이브러리
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libsndfile1 \
+      ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY backend/requirements.txt ./backend/
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
