@@ -844,19 +844,15 @@ _REASON_KO_LABELS: dict[str, str] = {
 
 
 def _ko_reason_label(text: str) -> str:
-    """영문 키워드/장르명을 한국어 표시로 변환. 없으면 원문 유지."""
     raw = (text or "").strip()
     if not raw:
         return raw
-    mapped = _REASON_KO_LABELS.get(raw.lower())
-    if mapped:
-        return mapped
-    # 여러 단어면 단어별 치환 시도
-    parts = raw.lower().split()
-    if len(parts) > 1:
-        mapped_parts = [_REASON_KO_LABELS.get(p, p) for p in parts]
-        if any(p in _REASON_KO_LABELS for p in parts):
-            return " ".join(mapped_parts)
+    low = raw.lower()
+    if low in _REASON_KO_LABELS:
+        return _REASON_KO_LABELS[low]
+    parts = low.split()
+    if len(parts) > 1 and any(p in _REASON_KO_LABELS for p in parts):
+        return " ".join(_REASON_KO_LABELS.get(p, p) for p in parts)
     return _display_genre(raw)
 
 SIMILARITY_WEIGHTS: dict[str, float] = {
@@ -1570,14 +1566,26 @@ async def get_track_detail(
         limit=12,
     )
 
+    exclude_key = _normalize_key(title, artist)
+
     if not similar_raw and isinstance(dz_track, dict):
-        similar_raw = await _deezer_fallback_similar(client, dz_track, _normalize_key(title, artist))
+        similar_raw = await _deezer_fallback_similar(client, dz_track, exclude_key)
 
     primary_genres = [g["name"] for g in genre_profile.get("genres", [])[:8]]
     classification_tags = primary_genres or filter_leaf_genre_names(tag_list)
     base_moods, base_styles = _extract_mood_style(ui)
     base_year = _parse_year(ui.get("release_year")) or _parse_year(release_date)
     base_artist_tags = [t.get("name", "") for t in lf_artist_tags if isinstance(t, dict) and t.get("name")]
+
+    # Last.fm/Deezer 유사곡이 없으면 장르·태그 인기곡으로 폴백
+    if not similar_raw:
+        fallback_tags = primary_genres or tag_list[:4] or base_artist_tags[:3]
+        similar_raw = await _genre_tag_fallback_similar(
+            client,
+            fallback_tags,
+            exclude_key,
+            limit=12,
+        )
 
     similar_enriched = []
     for t in similar_raw[:12]:
@@ -1675,27 +1683,101 @@ async def _deezer_fallback_similar(
     similar: list[dict] = []
     seen = {exclude_key}
 
+    def _add(track: dict, reason: str) -> None:
+        artist_name = track.get("artist", {}).get("name", "")
+        key = _normalize_key(track.get("title", ""), artist_name)
+        if not key or key in seen:
+            return
+        seen.add(key)
+        similar.append(
+            {
+                "title": track.get("title"),
+                "artist": artist_name,
+                "deezer_id": track.get("id"),
+                "cover": track.get("album", {}).get("cover_medium"),
+                "lastfm_match": 0,
+                "reason": reason,
+            }
+        )
+
     try:
+        # 같은 아티스트 인기곡
+        own_top = await _dz_get(client, f"/artist/{artist_id}/top", {"limit": "8"})
+        for track in own_top.get("data", []):
+            _add(track, "같은 아티스트")
+
         related = await _dz_get(client, f"/artist/{artist_id}/related")
         for rel in related.get("data", [])[:5]:
             top = await _dz_get(client, f"/artist/{rel['id']}/top", {"limit": "3"})
             for track in top.get("data", []):
-                artist_name = track.get("artist", {}).get("name", "")
-                key = _normalize_key(track.get("title", ""), artist_name)
-                if key in seen:
-                    continue
-                seen.add(key)
-                similar.append(
-                    {
-                        "title": track.get("title"),
-                        "artist": artist_name,
-                        "lastfm_match": 0,
-                        "reason": "인기 상업곡",
-                    }
-                )
+                _add(track, "유사 아티스트")
     except httpx.HTTPError:
         pass
 
+    return similar
+
+
+async def _genre_tag_fallback_similar(
+    client: httpx.AsyncClient,
+    tags: list[str],
+    exclude_key: str,
+    *,
+    limit: int = 12,
+) -> list[dict]:
+    """Last.fm/Deezer 유사곡이 없을 때 장르·태그 인기곡으로 채움."""
+    cleaned = [t.strip() for t in tags if (t or "").strip()][:4]
+    if not cleaned:
+        return []
+
+    similar: list[dict] = []
+    seen = {exclude_key}
+
+    async def from_lf(tag: str) -> list[dict]:
+        if not lf_configured():
+            return []
+        return await get_top_tracks_by_tag(client, tag, limit=limit)
+
+    async def from_dz(tag: str) -> list[dict]:
+        try:
+            data = await _dz_get(client, "/search", {"q": tag, "limit": str(limit)})
+        except httpx.HTTPError:
+            return []
+        out = []
+        for track in data.get("data", []):
+            if _is_cover_or_variant(track.get("title", "")):
+                continue
+            out.append(
+                {
+                    "title": track.get("title"),
+                    "artist": track.get("artist", {}).get("name", ""),
+                    "deezer_id": track.get("id"),
+                    "cover": track.get("album", {}).get("cover_medium"),
+                    "lastfm_match": 0,
+                    "reason": f"{tag} 장르",
+                    "source_keyword": tag,
+                }
+            )
+        return out
+
+    tasks = []
+    for tag in cleaned:
+        tasks.append(from_lf(tag))
+        tasks.append(from_dz(tag))
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for res in results:
+        if not isinstance(res, list):
+            continue
+        for track in res:
+            key = _normalize_key(track.get("title", ""), track.get("artist", ""))
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            if not track.get("reason"):
+                track["reason"] = "장르 기반 추천"
+            similar.append(track)
+            if len(similar) >= limit:
+                return similar
     return similar
 
 
@@ -2055,6 +2137,25 @@ async def recommend_by_keywords(
             continue
 
         scored.append((track, combined, hit_count))
+
+    # 필터가 너무 빡세면 상위 후보라도 반환 (빈 결과 방지)
+    if not scored and candidates:
+        for track in candidates:
+            track_tags = list(cleaned)
+            sk = track.get("source_keyword")
+            if sk:
+                track_tags.append(sk)
+            title = track.get("title", "")
+            artist = track.get("artist", "")
+            if title:
+                track_tags.append(title)
+            if artist:
+                track_tags.append(artist)
+            genre_sim = genre_similarity_between(cleaned, track_tags)
+            hit_count = _keyword_hit_count(cleaned, track_tags)
+            hit_ratio = (hit_count / len(cleaned)) * 100 if cleaned else 0
+            combined = round(min(100.0, genre_sim * 0.55 + hit_ratio * 0.45), 1)
+            scored.append((track, combined, hit_count))
 
     scored.sort(key=lambda x: (x[1], x[2]), reverse=True)
 

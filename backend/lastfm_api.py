@@ -143,17 +143,20 @@ async def get_similar_tracks(
     mbid: str | None = None,
     limit: int = 12,
 ) -> list[dict]:
-    params: dict[str, Any] = {"limit": str(limit)}
-    if mbid:
-        params["mbid"] = mbid
-    else:
-        params["artist"] = artist
-        params["track"] = track
+    async def _fetch(**params: Any) -> list[dict]:
+        data = await _call(client, "track.getSimilar", **params)
+        similar = data.get("similartracks", {}).get("track", [])
+        if isinstance(similar, dict):
+            similar = [similar]
+        return similar if isinstance(similar, list) else []
 
-    data = await _call(client, "track.getSimilar", **params)
-    similar = data.get("similartracks", {}).get("track", [])
-    if isinstance(similar, dict):
-        similar = [similar]
+    params: dict[str, Any] = {"limit": str(limit)}
+    similar: list[dict] = []
+    if mbid:
+        similar = await _fetch(mbid=mbid, limit=str(limit))
+    # MBID로 비면 artist+track 으로 재시도 (일부 곡은 MBID 유사곡이 없음)
+    if not similar and artist and track:
+        similar = await _fetch(artist=artist, track=track, limit=str(limit))
 
     out = []
     for t in similar:
