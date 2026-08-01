@@ -112,7 +112,7 @@ export function TrackRecommendRow({ track, onSelect, showReason = false }) {
             <div className="mt-2.5">
               <p className="text-[10px] font-medium text-zinc-500 dark:text-zinc-400">추천 이유</p>
               <ul className="mt-1 space-y-0.5">
-                {reasons.slice(0, 3).map((reason) => (
+                {reasons.slice(0, 4).map((reason) => (
                   <li key={reason} className="text-[11px] leading-snug text-zinc-600 dark:text-zinc-300">
                     <span className="text-accent">✓</span> {reason}
                   </li>
