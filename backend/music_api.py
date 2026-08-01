@@ -1066,107 +1066,96 @@ def _build_recommendation_reasons(
 
     sim_genre_names = [g.get("name", "") for g in sim_genre_profile.get("genres", []) if g.get("name")]
     sim_genre_lower = {n.lower() for n in sim_genre_names}
-
     bd = breakdown or {}
-
     base_tokens = _reason_tokens(base_genres, base_moods, base_styles, base_tags)
     sim_tokens = _reason_tokens(sim_tags, sim_genre_names, sim_moods or [], sim_styles or [])
 
-    # 1. 매칭된 장르 — 가장 구체적인 공통 장르 이름
-    if bd.get("genre", 0) >= 50:
-        matched_genre = False
-        for genre in base_genres:
-            if genre.lower() in sim_genre_lower:
-                add(f"공통 장르: {_ko_reason_label(genre)}")
-                matched_genre = True
-                break
-        if not matched_genre and sim_genre_profile.get("primary_genre"):
-            add(f"장르: {_ko_reason_label(sim_genre_profile['primary_genre'])}")
-
-    if source_genre and bd.get("genre", 0) >= 40:
+    # 1. 장르
+    for genre in base_genres:
+        if genre.lower() in sim_genre_lower:
+            add(f"공통 장르: {_ko_reason_label(genre)}")
+            break
+    if source_genre:
         add(f"장르 일치: {_ko_reason_label(source_genre)}")
+    if len(reasons) < 1 and sim_genre_profile.get("primary_genre"):
+        add(f"장르: {_ko_reason_label(sim_genre_profile['primary_genre'])}")
 
-    # 2. 키워드 매칭
-    for keyword in matched_keywords or []:
+    # 2. 키워드
+    for keyword in (matched_keywords or [])[:3]:
         add(_ko_reason_label(keyword))
 
-    # 3. 음악적 특징 — mood/style 토큰 기반으로 구체적인 feature 이유
-    feature_reasons: list[str] = []
+    # 3. 음악적 특징 (최대 2개)
+    feature_added = 0
     for keywords, label in _FEATURE_REASON_RULES:
+        if feature_added >= 2:
+            break
         if any(k in base_tokens for k in keywords) and any(k in sim_tokens for k in keywords):
-            feature_reasons.append(label)
+            add(label)
+            feature_added += 1
 
-    # 기여도 높은 feature를 우선 추가 (최대 2개)
-    priority_keys = {
-        "mood": ("감정", "우울", "몽환", "어둡", "로맨틱", "밝고", "차분", "노스탤지어", "그루비"),
-        "instrument": ("기타", "피아노", "신스", "베이스", "오케스트라", "브라스", "로파이"),
-        "vocal": ("보컬", "높은 음역", "랩", "하모니"),
-        "production": ("시네마틱", "미니멀", "레이어드", "디스토션", "리버브", "트랩", "댄스"),
-    }
-    added_features = 0
-    for group_labels in priority_keys.values():
-        for r in feature_reasons:
-            if any(p in r for p in group_labels):
-                add(r)
-                added_features += 1
-                break
-        if added_features >= 2:
-            break
-
-    # 남은 feature 추가 (중복 제외)
-    for r in feature_reasons:
-        if added_features >= 3:
-            break
-        add(r)
-        added_features += 1
-
-    # 4. 템포 — 구체적인 BPM 느낌
-    if bd.get("tempo", 0) >= 50:
-        tempo_labels = {
-            "slow": "느리고 여유로운 템포",
-            "mid": "미드 템포 그루브",
-            "fast": "빠르고 에너제틱한 템포",
-        }
-        if base_tempo and sim_tempo and base_tempo == sim_tempo:
-            add(tempo_labels.get(base_tempo, "비슷한 템포 감성"))
-
-    # 5. 아티스트 스타일
-    if bd.get("artist", 0) >= 65:
+    # 4. 템포 / 아티스트 / 시대 — 기준 완화
+    if bd.get("tempo", 0) >= 40 and base_tempo and sim_tempo and base_tempo == sim_tempo:
+        add(
+            {
+                "slow": "느리고 여유로운 템포",
+                "mid": "미드 템포 그루브",
+                "fast": "빠르고 에너제틱한 템포",
+            }.get(base_tempo, "비슷한 템포 감성")
+        )
+    if bd.get("artist", 0) >= 40:
         add("비슷한 아티스트 스타일과 프로덕션")
-
-    # 6. 시대 — 연도 포함
-    if bd.get("era", 0) >= 65:
+    if bd.get("era", 0) >= 45:
         base_era = _era_label(base_year)
         sim_era = _era_label(sim_year)
         if base_era and sim_era and base_era == sim_era:
             add(f"같은 시대 ({base_era})")
-        elif base_year and sim_year and abs(base_year - sim_year) <= 5:
+        elif base_year and sim_year and abs(base_year - sim_year) <= 8:
             add(f"가까운 발매 시기 ({sim_year})")
 
-    # 7. 태그 직접 매칭 — 구체적인 공통 태그
-    _SKIP_GENERIC = {"rock", "pop", "music", "korean", "song", "good", "alternative"}
+    # 5. 공통 태그
+    _SKIP = {"rock", "pop", "music", "korean", "song", "good", "alternative"}
     for tag in sim_tags[:8]:
         tag_l = tag.lower()
-        if tag_l in _SKIP_GENERIC or len(tag_l) < 4:
+        if tag_l in _SKIP or len(tag_l) < 3:
             continue
-        if any(tag_l in bt or bt in tag_l for bt in base_tokens if len(bt) >= 4):
+        if any(tag_l in bt or bt in tag_l for bt in base_tokens if len(bt) >= 3):
             add(f"공통 태그: {_ko_reason_label(tag)}")
+        if len(reasons) >= 4:
+            break
 
-    # 8. 청취자 유사도
-    if bd.get("listener", lastfm_match) >= 40:
-        add("팬들이 자주 함께 듣는 곡")
-    if map_sim >= 50 and bd.get("genre", 0) < 50:
+    # 6. 맵 / 청취
+    if map_sim >= 30:
         add("장르 맵에서 가까운 위치")
+    if bd.get("listener", lastfm_match) >= 20 or lastfm_match >= 20:
+        add("팬들이 자주 함께 듣는 곡")
 
-    if not reasons and sim_genre_profile.get("primary_genre"):
-        add(f"장르: {_ko_reason_label(sim_genre_profile['primary_genre'])}")
+    # 7. 부족하면 breakdown 점수로 채우기 (최소 3개 목표)
+    fillers = [
+        (bd.get("genre", 0), "장르 분위기가 비슷함"),
+        (bd.get("mood", 0), "감정선이 비슷함"),
+        (bd.get("tempo", 0), "템포 감성이 비슷함"),
+        (bd.get("artist", 0), "아티스트 성향이 비슷함"),
+        (map_sim, "장르 맵에서 가까운 위치"),
+    ]
+    for score, label in fillers:
+        if len(reasons) >= 3:
+            break
+        if score >= 25:
+            add(label)
+
+    if not reasons:
+        add("비슷한 음악적 분위기")
 
     return reasons[:4]
 
 
 def _attach_recommendation_reasons(item: dict, reasons: list[str]) -> dict:
-    item["reasons"] = reasons
-    item["reason"] = reasons[0] if reasons else item.get("reason", "")
+    out = list(reasons or [])
+    original = (item.get("reason") or "").strip()
+    if original and original.lower() not in {r.lower() for r in out}:
+        out.append(original)
+    item["reasons"] = out[:4]
+    item["reason"] = item["reasons"][0] if item["reasons"] else ""
     return item
 
 
