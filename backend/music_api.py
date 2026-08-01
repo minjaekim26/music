@@ -769,42 +769,95 @@ def _reason_tokens(*groups: list[str]) -> set[str]:
 
 _FEATURE_REASON_RULES: list[tuple[tuple[str, ...], str]] = [
     # 악기 / 사운드 텍스처
-    (("guitar", "acoustic guitar", "electric guitar"), "Guitar-driven sound"),
-    (("piano", "keys", "keyboard"), "Piano-based arrangement"),
-    (("synth", "synthesizer", "synth pop", "synthwave"), "Synth-heavy production"),
-    (("bass", "bassline", "bass guitar"), "Strong bass presence"),
-    (("drums", "drum machine", "percussion"), "Prominent rhythmic drive"),
-    (("strings", "orchestral", "orchestra", "violin", "cello"), "Orchestral strings"),
-    (("brass", "trumpet", "saxophone"), "Live brass elements"),
-    (("lo-fi", "lofi"), "Lo-fi aesthetic"),
+    (("guitar", "acoustic guitar", "electric guitar"), "기타 중심의 사운드"),
+    (("piano", "keys", "keyboard"), "피아노 기반 편곡"),
+    (("synth", "synthesizer", "synth pop", "synthwave"), "신스 중심 프로덕션"),
+    (("bass", "bassline", "bass guitar"), "강한 베이스 존재감"),
+    (("drums", "drum machine", "percussion"), "리듬 중심의 드라이브"),
+    (("strings", "orchestral", "orchestra", "violin", "cello"), "오케스트라 스트링"),
+    (("brass", "trumpet", "saxophone"), "브라스 연주 요소"),
+    (("lo-fi", "lofi"), "로파이 감성"),
     # 보컬 특성
-    (("vocal", "vocals", "singer", "singing"), "Expressive vocal delivery"),
-    (("falsetto", "high pitched", "soprano"), "High-register vocals"),
-    (("rap", "rapper", "hip hop", "trap"), "Rap / flow delivery"),
-    (("harmonies", "choir", "choral", "backing vocals"), "Rich vocal harmonies"),
+    (("vocal", "vocals", "singer", "singing"), "표현력 있는 보컬"),
+    (("falsetto", "high pitched", "soprano"), "높은 음역대 보컬"),
+    (("rap", "rapper", "hip hop", "trap"), "랩 / 플로우 전달력"),
+    (("harmonies", "choir", "choral", "backing vocals"), "풍부한 보컬 하모니"),
     # 분위기 / 감정
-    (("emotional", "melancholy", "melancholic", "heartfelt", "tearful"), "Emotionally resonant tone"),
-    (("sad", "sadness", "grief", "longing"), "Melancholic mood"),
-    (("dreamy", "ethereal", "hazy", "hypnotic"), "Dreamy, ethereal texture"),
-    (("atmospheric", "ambient", "cinematic"), "Cinematic atmosphere"),
-    (("dark", "gloomy", "gothic", "brooding"), "Dark, brooding mood"),
-    (("romantic", "love", "tender", "intimate"), "Romantic and intimate feel"),
-    (("nostalgic", "retro", "vintage"), "Nostalgic retro vibe"),
-    (("uplifting", "hopeful", "euphoric", "joyful"), "Uplifting emotional arc"),
-    (("chill", "relaxing", "calm", "mellow"), "Calm, mellow energy"),
-    (("aggressive", "intense", "raw", "fierce"), "High-intensity energy"),
-    (("groovy", "funky", "groove", "funk"), "Funky, groove-driven feel"),
+    (("emotional", "melancholy", "melancholic", "heartfelt", "tearful"), "감정선이 뚜렷한 톤"),
+    (("sad", "sadness", "grief", "longing"), "우울하고 서정적인 무드"),
+    (("dreamy", "ethereal", "hazy", "hypnotic"), "몽환적이고 이더리얼한 질감"),
+    (("atmospheric", "ambient", "cinematic"), "시네마틱한 분위기"),
+    (("dark", "gloomy", "gothic", "brooding"), "어둡고 묵직한 무드"),
+    (("romantic", "love", "tender", "intimate"), "로맨틱하고 친밀한 느낌"),
+    (("nostalgic", "retro", "vintage"), "노스탤지어 / 레트로 감성"),
+    (("uplifting", "hopeful", "euphoric", "joyful"), "밝고 고양되는 감정선"),
+    (("chill", "relaxing", "calm", "mellow"), "차분하고 편안한 에너지"),
+    (("aggressive", "intense", "raw", "fierce"), "강렬하고 높은 에너지"),
+    (("groovy", "funky", "groove", "funk"), "그루비하고 펑키한 느낌"),
     # 프로덕션 스타일
-    (("minimal", "minimalist", "sparse"), "Minimal production style"),
-    (("layered", "lush", "dense", "wall of sound"), "Lush, layered production"),
-    (("distortion", "fuzz", "overdriven", "heavy"), "Distorted guitar texture"),
-    (("reverb", "echo", "spacious", "vast"), "Reverb-soaked sound"),
-    (("808", "trap beat", "hi-hat", "drill"), "Trap / 808-driven beat"),
-    (("jazz", "jazzy", "swing", "improvisation"), "Jazz-influenced phrasing"),
-    (("r&b", "rnb", "soul", "neo soul"), "Soul / R&B groove"),
-    (("folk", "acoustic", "singer-songwriter"), "Acoustic folk sensibility"),
-    (("dance", "club", "edm", "house", "techno"), "Dance floor energy"),
+    (("minimal", "minimalist", "sparse"), "미니멀한 프로덕션"),
+    (("layered", "lush", "dense", "wall of sound"), "레이어드된 풍성한 사운드"),
+    (("distortion", "fuzz", "overdriven", "heavy"), "디스토션 기타 텍스처"),
+    (("reverb", "echo", "spacious", "vast"), "리버브가 풍부한 공간감"),
+    (("808", "trap beat", "hi-hat", "drill"), "트랩 / 808 중심 비트"),
+    (("jazz", "jazzy", "swing", "improvisation"), "재즈 영향의 프레이징"),
+    (("r&b", "rnb", "soul", "neo soul"), "소울 / R&B 그루브"),
+    (("folk", "acoustic", "singer-songwriter"), "어쿠스틱 포크 감성"),
+    (("dance", "club", "edm", "house", "techno"), "댄스플로어 에너지"),
 ]
+
+# 키워드·무드 영문 → 한국어 표시
+_REASON_KO_LABELS: dict[str, str] = {
+    "dreamy": "몽환적",
+    "indie": "인디",
+    "ambient": "앰비언트",
+    "emotional": "감성적",
+    "calm": "차분한",
+    "chill": "칠한",
+    "sad": "슬픈",
+    "happy": "밝은",
+    "energetic": "에너제틱",
+    "melancholy": "멜랑콜리",
+    "rock": "록",
+    "pop": "팝",
+    "jazz": "재즈",
+    "classical": "클래식",
+    "electronic": "일렉트로닉",
+    "hip hop": "힙합",
+    "rnb": "R&B",
+    "r&b": "R&B",
+    "folk": "포크",
+    "soul": "소울",
+    "slow": "슬로우",
+    "fast": "빠른 템포",
+    "mid": "미드 템포",
+    "alternative": "얼터너티브",
+    "alternative rock": "얼터너티브 록",
+    "indie rock": "인디 록",
+    "indie pop": "인디 팝",
+    "synth": "신스",
+    "piano": "피아노",
+    "guitar": "기타",
+    "night": "밤 분위기",
+    "alone": "혼자 듣기 좋은",
+}
+
+
+def _ko_reason_label(text: str) -> str:
+    """영문 키워드/장르명을 한국어 표시로 변환. 없으면 원문 유지."""
+    raw = (text or "").strip()
+    if not raw:
+        return raw
+    mapped = _REASON_KO_LABELS.get(raw.lower())
+    if mapped:
+        return mapped
+    # 여러 단어면 단어별 치환 시도
+    parts = raw.lower().split()
+    if len(parts) > 1:
+        mapped_parts = [_REASON_KO_LABELS.get(p, p) for p in parts]
+        if any(p in _REASON_KO_LABELS for p in parts):
+            return " ".join(mapped_parts)
+    return _display_genre(raw)
 
 SIMILARITY_WEIGHTS: dict[str, float] = {
     "genre": 0.32,
@@ -1028,18 +1081,18 @@ def _build_recommendation_reasons(
         matched_genre = False
         for genre in base_genres:
             if genre.lower() in sim_genre_lower:
-                add(f"Shared genre: {_display_genre(genre)}")
+                add(f"공통 장르: {_ko_reason_label(genre)}")
                 matched_genre = True
                 break
         if not matched_genre and sim_genre_profile.get("primary_genre"):
-            add(f"Genre: {_display_genre(sim_genre_profile['primary_genre'])}")
+            add(f"장르: {_ko_reason_label(sim_genre_profile['primary_genre'])}")
 
     if source_genre and bd.get("genre", 0) >= 40:
-        add(f"Genre match: {_display_genre(source_genre)}")
+        add(f"장르 일치: {_ko_reason_label(source_genre)}")
 
     # 2. 키워드 매칭
     for keyword in matched_keywords or []:
-        add(_display_genre(keyword) if " " in keyword else keyword.capitalize())
+        add(_ko_reason_label(keyword))
 
     # 3. 음악적 특징 — mood/style 토큰 기반으로 구체적인 feature 이유
     feature_reasons: list[str] = []
@@ -1049,15 +1102,15 @@ def _build_recommendation_reasons(
 
     # 기여도 높은 feature를 우선 추가 (최대 2개)
     priority_keys = {
-        "mood": ("Emotional", "Melancholic", "Dreamy", "Dark", "Romantic", "Uplifting", "Calm", "Nostalgic", "Groovy"),
-        "instrument": ("Guitar", "Piano", "Synth", "Bass", "Strings", "Brass", "Lo-fi"),
-        "vocal": ("Expressive vocal", "High-register", "Rap", "Rich vocal"),
-        "production": ("Cinematic", "Minimal", "Lush", "Distorted", "Reverb", "Trap", "Dance"),
+        "mood": ("감정", "우울", "몽환", "어둡", "로맨틱", "밝고", "차분", "노스탤지어", "그루비"),
+        "instrument": ("기타", "피아노", "신스", "베이스", "오케스트라", "브라스", "로파이"),
+        "vocal": ("보컬", "높은 음역", "랩", "하모니"),
+        "production": ("시네마틱", "미니멀", "레이어드", "디스토션", "리버브", "트랩", "댄스"),
     }
     added_features = 0
     for group_labels in priority_keys.values():
         for r in feature_reasons:
-            if any(r.startswith(p) for p in group_labels):
+            if any(p in r for p in group_labels):
                 add(r)
                 added_features += 1
                 break
@@ -1074,25 +1127,25 @@ def _build_recommendation_reasons(
     # 4. 템포 — 구체적인 BPM 느낌
     if bd.get("tempo", 0) >= 50:
         tempo_labels = {
-            "slow": "Slow, laid-back tempo",
-            "mid": "Mid-tempo groove",
-            "fast": "Fast, high-energy tempo",
+            "slow": "느리고 여유로운 템포",
+            "mid": "미드 템포 그루브",
+            "fast": "빠르고 에너제틱한 템포",
         }
         if base_tempo and sim_tempo and base_tempo == sim_tempo:
-            add(tempo_labels.get(base_tempo, "Similar tempo feel"))
+            add(tempo_labels.get(base_tempo, "비슷한 템포 감성"))
 
     # 5. 아티스트 스타일
     if bd.get("artist", 0) >= 65:
-        add("Similar artist style and production")
+        add("비슷한 아티스트 스타일과 프로덕션")
 
     # 6. 시대 — 연도 포함
     if bd.get("era", 0) >= 65:
         base_era = _era_label(base_year)
         sim_era = _era_label(sim_year)
         if base_era and sim_era and base_era == sim_era:
-            add(f"Same era ({base_era})")
+            add(f"같은 시대 ({base_era})")
         elif base_year and sim_year and abs(base_year - sim_year) <= 5:
-            add(f"Close release period ({sim_year})")
+            add(f"가까운 발매 시기 ({sim_year})")
 
     # 7. 태그 직접 매칭 — 구체적인 공통 태그
     _SKIP_GENERIC = {"rock", "pop", "music", "korean", "song", "good", "alternative"}
@@ -1101,16 +1154,16 @@ def _build_recommendation_reasons(
         if tag_l in _SKIP_GENERIC or len(tag_l) < 4:
             continue
         if any(tag_l in bt or bt in tag_l for bt in base_tokens if len(bt) >= 4):
-            add(f"Tagged: {_display_genre(tag)}")
+            add(f"공통 태그: {_ko_reason_label(tag)}")
 
     # 8. 청취자 유사도
     if bd.get("listener", lastfm_match) >= 40:
-        add("Frequently co-listened by fans")
+        add("팬들이 자주 함께 듣는 곡")
     if map_sim >= 50 and bd.get("genre", 0) < 50:
-        add("Positioned close on genre map")
+        add("장르 맵에서 가까운 위치")
 
     if not reasons and sim_genre_profile.get("primary_genre"):
-        add(f"Genre: {_display_genre(sim_genre_profile['primary_genre'])}")
+        add(f"장르: {_ko_reason_label(sim_genre_profile['primary_genre'])}")
 
     return reasons[:4]
 

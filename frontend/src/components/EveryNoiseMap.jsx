@@ -62,6 +62,10 @@ export function normalizeNodesInBounds(nodes, sourceBounds, localBounds) {
   });
 }
 
+const LOUPE_SIZE = 340;
+const LOUPE_ZOOM = 2.0;
+const LOUPE_RADIUS = 200; // 캔버스 좌표 기준 유사 장르 반경
+
 export default function EveryNoiseMap({
   nodes,
   bounds,
@@ -77,10 +81,14 @@ export default function EveryNoiseMap({
   searchQuery = "",
   focusMode = false,
   fitToView = false,
+  enableLoupe = true,
 }) {
   const containerRef = useRef(null);
+  const loupeRafRef = useRef(0);
   const [viewport, setViewport] = useState({ left: 0, top: 0, width: 1, height: 1 });
   const [scale, setScale] = useState(1);
+  // 돋보기: 컨테이너 좌표(cx/cy) + 캔버스 좌표(hx/hy)
+  const [loupe, setLoupe] = useState(null);
 
   const renderBounds = viewBounds || bounds;
 
@@ -136,6 +144,37 @@ export default function EveryNoiseMap({
     };
   }, [updateViewport, nodes, bounds, scale]);
 
+  const nearIds = useMemo(() => {
+    if (!loupe || !nodes?.length) return new Set();
+    const ids = new Set();
+    for (const node of nodes) {
+      const { left, top } = toRenderPos(node);
+      const dx = left + PAD - loupe.hx;
+      const dy = top + PAD - loupe.hy;
+      if (Math.sqrt(dx * dx + dy * dy) <= LOUPE_RADIUS) {
+        ids.add(node.id);
+      }
+    }
+    return ids;
+  }, [loupe, nodes, toRenderPos]);
+
+  const loupeNodes = useMemo(() => {
+    if (!loupe || !nodes?.length) return [];
+    // 돋보기 안에 넣을 후보: 반경 내 + 인기 장르 보강
+    const scored = [];
+    for (const node of nodes) {
+      const { left, top } = toRenderPos(node);
+      const nx = left + PAD;
+      const ny = top + PAD;
+      const dist = Math.sqrt((nx - loupe.hx) ** 2 + (ny - loupe.hy) ** 2);
+      if (dist > LOUPE_RADIUS * 1.45 && (node.fontSize || 0) < 115) continue;
+      if (dist > LOUPE_RADIUS * 1.9) continue;
+      scored.push({ node, dist, nx, ny });
+    }
+    scored.sort((a, b) => a.dist - b.dist || (b.node.fontSize || 0) - (a.node.fontSize || 0));
+    return scored.slice(0, 72);
+  }, [loupe, nodes, toRenderPos]);
+
   const visibleNodes = useMemo(() => {
     if (!nodes?.length) return [];
     if (showAll || nodes.length <= 300 || searchLower) return nodes;
@@ -156,10 +195,11 @@ export default function EveryNoiseMap({
         selection.has(node.name?.toLowerCase()) ||
         focusedId === node.id ||
         matchedIds.has(node.id) ||
+        nearIds.has(node.id) ||
         (node.fontSize || 0) >= 130;
       return inView || important;
     });
-  }, [nodes, bounds, viewport, scale, selection, focusedId, matchedIds, showAll, searchLower, toRenderPos]);
+  }, [nodes, bounds, viewport, scale, selection, focusedId, matchedIds, nearIds, showAll, searchLower, toRenderPos]);
 
   const trackPx = useMemo(() => {
     if (!trackPosition) return null;
@@ -233,6 +273,100 @@ export default function EveryNoiseMap({
     return () => cancelAnimationFrame(id);
   }, [fitToView, nodes, trackPx, toRenderPos]);
 
+  const handleLoupeMove = useCallback(
+    (e) => {
+      if (!enableLoupe) return;
+      const el = containerRef.current;
+      if (!el) return;
+
+      const rect = el.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const hx = (cx + el.scrollLeft) / scale;
+      const hy = (cy + el.scrollTop) / scale;
+
+      if (loupeRafRef.current) cancelAnimationFrame(loupeRafRef.current);
+      loupeRafRef.current = requestAnimationFrame(() => {
+        setLoupe({ cx, cy, hx, hy });
+      });
+    },
+    [enableLoupe, scale],
+  );
+
+  const clearLoupe = useCallback(() => {
+    if (loupeRafRef.current) cancelAnimationFrame(loupeRafRef.current);
+    setLoupe(null);
+  }, []);
+
+  useEffect(() => () => {
+    if (loupeRafRef.current) cancelAnimationFrame(loupeRafRef.current);
+  }, []);
+
+  function renderGenreLabel(node, opts = {}) {
+    const { left, top } = toRenderPos(node);
+    const active = selection.has(node.id) || selection.has(node.name?.toLowerCase());
+    const focused = focusedId === node.id;
+    const matched = matchedIds.has(node.id);
+    const near = nearIds.has(node.id);
+    const baseSize = focusMode ? 12 : Math.max(11, Math.round((node.fontSize || 100) * 0.13));
+    let size = matched && focusMode ? baseSize + 1 : baseSize;
+    if (near && !opts.inLoupe) size = Math.max(size, baseSize + 3);
+    if (opts.inLoupe) size = Math.max(14, Math.round((node.fontSize || 100) * 0.16) + 2);
+
+    const hasChildren = (node.children?.length || 0) > 0;
+    const searchHit = searchLower && node.name?.toLowerCase().includes(searchLower);
+    const dimmed = searchLower && !searchHit && !near;
+
+    const pillClass = focusMode
+      ? matched
+        ? "rounded-md border border-accent/50 bg-accent/20 px-1.5 py-0.5 shadow-sm shadow-accent/20"
+        : "rounded-md border border-zinc-900/10 bg-white/90 px-1.5 py-0.5 shadow-sm dark:border-white/15 dark:bg-black/60"
+      : active || focused || searchHit || near
+        ? "rounded bg-white/90 px-0.5 dark:bg-black/50"
+        : undefined;
+
+    return (
+      <div
+        key={opts.key || node.id}
+        role={opts.inLoupe ? undefined : "button"}
+        tabIndex={opts.inLoupe ? undefined : 0}
+        onClick={opts.inLoupe ? undefined : () => onSelect?.(node)}
+        onKeyDown={
+          opts.inLoupe
+            ? undefined
+            : (e) => {
+                if (e.key === "Enter" || e.key === " ") onSelect?.(node);
+              }
+        }
+        className={`absolute whitespace-nowrap ${opts.inLoupe ? "pointer-events-none" : "group cursor-pointer"} ${
+          active || focused || matched || searchHit || near ? "z-30" : "z-10"
+        }`}
+        style={{
+          left: left + PAD,
+          top: top + PAD,
+          color: node.color,
+          fontSize: `${size}px`,
+          fontWeight: matched || active || focused || searchHit || near ? 700 : focusMode ? 600 : 400,
+          opacity: dimmed ? 0.18 : matched || active || focused || near ? 1 : focusMode ? 0.92 : 0.85,
+          textShadow: near || focusMode
+            ? "0 1px 2px rgba(0,0,0,0.4), 0 0 10px rgba(0,0,0,0.25)"
+            : undefined,
+          transform: near && !opts.inLoupe ? "scale(1.08)" : undefined,
+          transformOrigin: "left center",
+          transition: "transform 120ms ease, opacity 120ms ease, font-size 120ms ease",
+        }}
+        title={hasChildren ? `${node.name} — 클릭해 하위 장르 보기` : node.name}
+      >
+        <span className={pillClass}>{node.name}</span>
+        {hasChildren && !focusMode && !opts.inLoupe && (
+          <span className="ml-0.5 text-teal-600 opacity-70 group-hover:opacity-100 dark:text-teal-400">
+            »
+          </span>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="relative min-w-0">
       <div className="absolute right-3 top-3 z-20 flex gap-1">
@@ -252,10 +386,18 @@ export default function EveryNoiseMap({
         </button>
       </div>
 
+      {enableLoupe && (
+        <p className="pointer-events-none absolute bottom-3 left-3 z-20 rounded-lg border border-zinc-900/10 bg-white/85 px-2 py-1 text-[10px] text-zinc-500 shadow-sm dark:border-white/10 dark:bg-black/70 dark:text-zinc-400">
+          커서 위로 유사 장르 확대
+        </p>
+      )}
+
       <div
         ref={containerRef}
         className="overflow-x-auto overflow-y-auto bg-white dark:bg-[#0a0a0f]"
-        style={{ height, maxWidth: "100%" }}
+        style={{ height, maxWidth: "100%", cursor: enableLoupe ? "crosshair" : undefined }}
+        onMouseMove={handleLoupeMove}
+        onMouseLeave={clearLoupe}
       >
         <div
           style={{
@@ -303,60 +445,20 @@ export default function EveryNoiseMap({
                 </svg>
               )}
 
-              {visibleNodes.map((node) => {
-                const { left, top } = toRenderPos(node);
-                const active = selection.has(node.id) || selection.has(node.name?.toLowerCase());
-                const focused = focusedId === node.id;
-                const matched = matchedIds.has(node.id);
-                const baseSize = focusMode ? 12 : Math.max(11, Math.round((node.fontSize || 100) * 0.13));
-                const size = matched && focusMode ? baseSize + 1 : baseSize;
-                const hasChildren = (node.children?.length || 0) > 0;
+              {/* 돋보기 반경 표시 */}
+              {loupe && enableLoupe && (
+                <div
+                  className="pointer-events-none absolute z-[5] rounded-full border border-accent/35 bg-accent/5"
+                  style={{
+                    left: loupe.hx - LOUPE_RADIUS,
+                    top: loupe.hy - LOUPE_RADIUS,
+                    width: LOUPE_RADIUS * 2,
+                    height: LOUPE_RADIUS * 2,
+                  }}
+                />
+              )}
 
-                const searchHit = searchLower && node.name?.toLowerCase().includes(searchLower);
-                const dimmed = searchLower && !searchHit;
-
-                const pillClass = focusMode
-                  ? matched
-                    ? "rounded-md border border-accent/50 bg-accent/20 px-1.5 py-0.5 shadow-sm shadow-accent/20"
-                    : "rounded-md border border-zinc-900/10 bg-white/90 px-1.5 py-0.5 shadow-sm dark:border-white/15 dark:bg-black/60"
-                  : active || focused || searchHit
-                    ? "rounded bg-white/90 px-0.5 dark:bg-black/50"
-                    : undefined;
-
-                return (
-                  <div
-                    key={node.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onSelect?.(node)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") onSelect?.(node);
-                    }}
-                    className={`group absolute cursor-pointer whitespace-nowrap ${
-                      active || focused || matched || searchHit ? "z-30" : "z-10"
-                    }`}
-                    style={{
-                      left: left + PAD,
-                      top: top + PAD,
-                      color: node.color,
-                      fontSize: `${size}px`,
-                      fontWeight: matched || active || focused || searchHit ? 700 : focusMode ? 600 : 400,
-                      opacity: dimmed ? 0.2 : matched || active || focused ? 1 : focusMode ? 0.92 : 0.85,
-                      textShadow: focusMode
-                        ? "0 1px 2px rgba(0,0,0,0.35), 0 0 8px rgba(0,0,0,0.2)"
-                        : undefined,
-                    }}
-                    title={hasChildren ? `${node.name} — 클릭해 하위 장르 보기` : node.name}
-                  >
-                    <span className={pillClass}>{node.name}</span>
-                    {hasChildren && !focusMode && (
-                      <span className="ml-0.5 text-teal-600 opacity-70 group-hover:opacity-100 dark:text-teal-400">
-                        »
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
+              {visibleNodes.map((node) => renderGenreLabel(node))}
 
               {trackPx && (
                 <div
@@ -375,6 +477,55 @@ export default function EveryNoiseMap({
           </div>
         </div>
       </div>
+
+      {/* 돋보기 루페 — 스크롤 영역 밖 오버레이 (클리핑 방지) */}
+      {enableLoupe && loupe && loupeNodes.length > 0 && (
+        <div
+          className="pointer-events-none absolute z-50 overflow-hidden rounded-full border-[3px] border-white bg-white shadow-[0_8px_32px_rgba(0,0,0,0.28)] ring-1 ring-zinc-900/20 dark:border-zinc-200 dark:bg-[#0a0a0f] dark:ring-white/20"
+          style={{
+            width: LOUPE_SIZE,
+            height: LOUPE_SIZE,
+            left: Math.min(
+              Math.max(8, loupe.cx - LOUPE_SIZE / 2),
+              Math.max(8, (containerRef.current?.clientWidth || LOUPE_SIZE) - LOUPE_SIZE - 8),
+            ),
+            top: Math.min(
+              Math.max(8, loupe.cy - LOUPE_SIZE / 2 - 12),
+              Math.max(8, (containerRef.current?.clientHeight || LOUPE_SIZE) - LOUPE_SIZE - 8),
+            ),
+          }}
+        >
+          <div
+            className="absolute"
+            style={{
+              width: canvasSize.width,
+              height: canvasSize.height,
+              transform: `translate(${LOUPE_SIZE / 2 - loupe.hx * LOUPE_ZOOM}px, ${LOUPE_SIZE / 2 - loupe.hy * LOUPE_ZOOM}px) scale(${LOUPE_ZOOM})`,
+              transformOrigin: "0 0",
+            }}
+          >
+            <div
+              className="absolute inset-0 opacity-40"
+              style={{
+                backgroundImage:
+                  "radial-gradient(circle at 1px 1px, rgba(120,120,140,0.25) 1px, transparent 0)",
+                backgroundSize: "28px 28px",
+              }}
+            />
+            {loupeNodes.map(({ node }) => renderGenreLabel(node, { inLoupe: true, key: `loupe-${node.id}` }))}
+          </div>
+          <div
+            className="pointer-events-none absolute inset-0 rounded-full"
+            style={{
+              background:
+                "radial-gradient(circle at 35% 28%, rgba(255,255,255,0.35), transparent 45%)",
+            }}
+          />
+          <div className="absolute bottom-2 left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/55 px-2 py-0.5 text-[9px] font-medium text-white/90">
+            유사 장르 {nearIds.size}개
+          </div>
+        </div>
+      )}
     </div>
   );
 }
