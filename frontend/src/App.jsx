@@ -28,6 +28,33 @@ function searchEmptyHint(meta, query) {
   return `'${query}'에 맞는 곡을 찾지 못했습니다. 영문 제목·아티스트로 검색해 보세요.`;
 }
 
+function AiReasonBox({ text, className = "" }) {
+  if (!text) return null;
+  return (
+    <div className={`rounded-xl border border-accent/25 bg-accent/5 px-3 py-2.5 ${className}`}>
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-accent">AI 추천 설명</p>
+      <p className="mt-1 text-[13px] leading-relaxed text-zinc-700 dark:text-zinc-200">{text}</p>
+    </div>
+  );
+}
+
+function fallbackAiReason(query, tracks) {
+  if (!tracks?.length) return "";
+  const bits = [];
+  for (const t of tracks.slice(0, 5)) {
+    for (const r of t.reasons || (t.reason ? [t.reason] : [])) {
+      if (r && !bits.includes(r)) bits.push(r);
+      if (bits.length >= 3) break;
+    }
+    if (bits.length >= 3) break;
+  }
+  const focus = bits.join(", ") || "비슷한 분위기";
+  const artists = [...new Set(tracks.slice(0, 3).map((t) => t.artist).filter(Boolean))];
+  const artistPart = artists.length ? `${artists.slice(0, 2).join(", ")} 등의 곡` : "선별된 곡들";
+  const q = (query || "요청하신 취향").trim();
+  return `「${q}」에 맞춰 ${focus} 기준으로 골랐어요. ${artistPart}이 잘 어울립니다.`;
+}
+
 function applyTheme(next) {
   const root = document.documentElement;
   if (next === "dark") root.classList.add("dark");
@@ -683,14 +710,13 @@ export default function App() {
           {(recResult?.tracks?.length > 0) && !searching && !recLoading && (
             <div className="border-t border-zinc-900/10 dark:border-white/10">
               <p className="px-3 py-1.5 text-[11px] text-zinc-400">추천 · 유사도순</p>
-              {recResult.recommendation_reason && (
-                <div className="mx-2 mb-2 rounded-xl border border-accent/20 bg-accent/5 px-3 py-2.5">
-                  <p className="text-[10px] font-medium text-accent">AI 추천 설명</p>
-                  <p className="mt-1 text-[12px] leading-relaxed text-zinc-700 dark:text-zinc-300">
-                    {recResult.recommendation_reason}
-                  </p>
-                </div>
-              )}
+              <AiReasonBox
+                className="mx-2 mb-2"
+                text={
+                  recResult.recommendation_reason ||
+                  fallbackAiReason(query, recResult.tracks)
+                }
+              />
               <div className="px-2 py-2">
                 <TrackRecommendList
                   tracks={recPagination.slice}
@@ -779,6 +805,18 @@ export default function App() {
                   ? `'${detail.title}' 비슷한 음악`
                   : "추천"}
             </p>
+            {!loadingGenreRecs && (
+              <AiReasonBox
+                className="mx-3 mt-3"
+                text={
+                  detail?.recommendation_reason ||
+                  fallbackAiReason(
+                    detail?.title ? `${detail.title} · ${detail.artist}` : query,
+                    detailRecTracks,
+                  )
+                }
+              />
+            )}
             <div className="px-2 py-2">
               {loadingGenreRecs ? (
                 <LoadingSteps active compact />

@@ -46,6 +46,7 @@ from search_aliases import expand_search_queries, has_hangul, init_search_aliase
 from track_metadata import normalize_for_genre_lookup
 import embedding as emb
 import track_cache
+import openai_service
 
 USER_AGENT = os.getenv(
     "MUSICBRAINZ_USER_AGENT",
@@ -1597,6 +1598,14 @@ async def get_track_detail(
 
     all_tags_unique = filter_leaf_genre_names(list(dict.fromkeys(tag_list))[:20])
 
+    recommendation_reason = ""
+    if similar_enriched:
+        recommendation_reason = await openai_service.generate_recommendation_reason(
+            client,
+            f"{title} · {artist}와 비슷한 곡",
+            similar_enriched,
+        )
+
     return {
         "mbid": lf_query_mbid
         or (
@@ -1641,6 +1650,7 @@ async def get_track_detail(
             "inferred": genre_inferred,
         },
         "similar_tracks": similar_enriched,
+        "recommendation_reason": recommendation_reason,
         "external_url": external_url,
         "source": source,
         "source_label": _source_label(source),
