@@ -606,9 +606,10 @@ export default function App() {
         <button
           type="button"
           onClick={resetHome}
-          className="font-display text-base font-bold tracking-tight text-zinc-900 transition hover:text-accent dark:text-white dark:hover:text-accent"
+          className="flex items-center gap-2 font-display text-base font-bold tracking-tight text-zinc-900 transition hover:opacity-90 dark:text-white"
         >
-          distribution
+          <img src="/logo.png" alt="" className="h-8 w-8 rounded-full object-contain" />
+          <span className="hover:text-accent">distribution</span>
         </button>
         <div className="flex items-center gap-2">
           <button
