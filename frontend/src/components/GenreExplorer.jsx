@@ -168,7 +168,7 @@ export default function GenreExplorer({
 
       <div className="absolute left-1/2 top-1/2 flex max-h-[92vh] w-[min(1200px,96vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-3xl border border-zinc-900/10 bg-white shadow-2xl dark:border-white/10 dark:bg-[#0a0a12]">
         <div className="flex shrink-0 items-center gap-3 border-b border-zinc-900/10 px-5 py-3 dark:border-white/5">
-          <h3 className="shrink-0 font-display text-lg font-semibold text-zinc-900 dark:text-white">
+          <h3 className="shrink-0 font-display text-base font-semibold text-zinc-900 dark:text-white">
             {drillRoot ? drillRoot.name : "장르 맵"}
           </h3>
           <input

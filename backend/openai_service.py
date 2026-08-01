@@ -149,24 +149,49 @@ def _build_reason_prompt(user_query: str, tracks: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def fallback_recommendation_reason(user_query: str, tracks: list[dict]) -> str:
+    """GPT 실패 시에도 UI에 보여줄 간단한 한국어 설명."""
+    if not tracks:
+        return ""
+
+    query = (user_query or "").strip() or "요청하신 취향"
+    artists = list(
+        dict.fromkeys(
+            (t.get("artist") or "").strip() for t in tracks[:4] if (t.get("artist") or "").strip()
+        )
+    )
+    reason_bits: list[str] = []
+    for t in tracks[:6]:
+        for r in t.get("reasons") or ([] if not t.get("reason") else [t["reason"]]):
+            text = str(r).strip()
+            if text and text not in reason_bits:
+                reason_bits.append(text)
+            if len(reason_bits) >= 3:
+                break
+        if len(reason_bits) >= 3:
+            break
+
+    focus = ", ".join(reason_bits) if reason_bits else "비슷한 분위기와 장르"
+    artist_part = f"{', '.join(artists[:2])} 등의 곡" if artists else "선별된 곡들"
+    return (
+        f"「{query}」에 맞춰 {focus} 기준으로 골랐어요. "
+        f"{artist_part}이 잘 어울립니다."
+    )
+
+
 async def generate_recommendation_reason(
     client: httpx.AsyncClient,
     user_query: str,
     tracks: list[dict],
 ) -> str:
-    """추천 결과에 대한 GPT 설명 생성. 실패 시 빈 문자열 반환.
-
-    Parameters
-    ----------
-    client:
-        공유 httpx.AsyncClient.
-    user_query:
-        사용자가 입력한 원문 검색어 또는 취향 설명.
-    tracks:
-        추천 트랙 목록 (title, artist, genre_tags, recommendation_reasons 포함).
-    """
-    if not is_configured() or not tracks:
+    """추천 결과에 대한 GPT 설명 생성. 실패 시 한국어 폴백 반환."""
+    if not tracks:
         return ""
+
+    fallback = fallback_recommendation_reason(user_query, tracks)
+
+    if not is_configured():
+        return fallback
 
     # OPENAI_CHAT_MODEL → OPENAI_MODEL → gpt-4o-mini (taste_analysis 와 통일)
     model = (
@@ -188,7 +213,8 @@ async def generate_recommendation_reason(
                         "content": (
                             "당신은 음악 큐레이터입니다. "
                             "사용자의 음악 취향에 맞는 추천 결과를 "
-                            "따뜻하고 자연스러운 한국어로 설명합니다."
+                            "따뜻하고 자연스러운 한국어로 설명합니다. "
+                            "반드시 한국어로만 답하세요."
                         ),
                     },
                     {"role": "user", "content": prompt},
@@ -196,7 +222,7 @@ async def generate_recommendation_reason(
                 "max_tokens": 300,
                 "temperature": 0.7,
             },
-            timeout=30.0,
+            timeout=45.0,
         )
         if resp.status_code >= 400:
             logger.warning(
@@ -204,10 +230,10 @@ async def generate_recommendation_reason(
                 resp.status_code,
                 resp.text[:300],
             )
-            return ""
+            return fallback
         data: Any = resp.json()
-        content = data["choices"][0]["message"].get("content") or ""
-        return content.strip()
+        content = (data["choices"][0]["message"].get("content") or "").strip()
+        return content or fallback
     except Exception as exc:
         logger.warning("OpenAI recommendation_reason failed: %s", exc)
-        return ""
+        return fallback

@@ -177,7 +177,7 @@ function TrackDetail({
         <div className="min-w-0 flex-1 space-y-4">
           <div>
             <p className="text-sm font-medium uppercase tracking-widest text-accent">distribution</p>
-            <h2 className="font-display mt-1 text-3xl font-bold leading-tight text-white md:text-4xl">
+            <h2 className="font-display mt-1 text-2xl font-bold leading-tight text-white md:text-3xl">
               <span className="text-zinc-900 dark:text-white">{detail.title}</span>
             </h2>
             <p className="mt-1 text-lg text-zinc-700 dark:text-zinc-300">{detail.artist}</p>
@@ -574,7 +574,7 @@ export default function App() {
         <button
           type="button"
           onClick={resetHome}
-          className="font-display text-lg font-bold tracking-tight text-zinc-900 transition hover:text-accent dark:text-white dark:hover:text-accent"
+          className="font-display text-base font-bold tracking-tight text-zinc-900 transition hover:text-accent dark:text-white dark:hover:text-accent"
         >
           distribution
         </button>
