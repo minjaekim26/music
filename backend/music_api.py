@@ -134,7 +134,7 @@ def _token_overlap(a: str, b: str) -> float:
 
 
 def _is_cover_or_variant(title: str) -> bool:
-    lowered = title.lower()
+    lowered = (title or "").lower()
     skip_words = (
         "piano",
         "karaoke",
@@ -142,12 +142,41 @@ def _is_cover_or_variant(title: str) -> bool:
         "cover",
         "remix",
         "live at",
+        "live from",
+        "live version",
         "tribute",
         "rendition",
         "8-bit",
         "lullaby",
+        "sped up",
+        "slowed",
+        "nightcore",
+        "bootleg",
+        "mashup",
+        "fanmade",
+        "fan made",
+        "unofficial",
+        "tiktok version",
+        "reverb",
+        "acoustic version",
+        "piano version",
+        "guitar version",
     )
     return any(word in lowered for word in skip_words)
+
+
+def _is_official_search_hit(item: dict) -> bool:
+    """오피셜(스튜디오 원곡) 우선 판별 — 커버/라이브/팬메이드 등은 False."""
+    title = item.get("title") or ""
+    if _is_cover_or_variant(title):
+        return False
+    source = (item.get("source") or "").lower()
+    # YouTube/SoundCloud 단독 히트는 커버·가사 영상일 확률 높음
+    if source in {"ytmusic", "youtube", "soundcloud"} and not item.get("mbid") and not item.get("deezer_id"):
+        # 인기가 매우 높으면 오피셜로 간주
+        if int(item.get("listeners") or 0) < 50_000 and int(item.get("commercial_score") or 0) < 50_000:
+            return False
+    return True
 
 
 def _score_deezer_match(track: dict, title: str, artist: str) -> float:
@@ -614,13 +643,16 @@ async def search_tracks(client: httpx.AsyncClient, query: str, limit: int = 12) 
         # 정확도(관련도) 0% 결과는 검색 목록에서 제외
         if rel <= 0:
             continue
-        scored.append({**item, "relevance": rel})
+        official = _is_official_search_hit(item)
+        scored.append({**item, "relevance": rel, "is_official": official})
 
     scored.sort(key=_search_sort_key)
     top = _finalize_search_order(scored, fetch_limit)
     enriched = await asyncio.gather(*[_enrich_search_result(client, item) for item in top])
     for row in enriched:
         row["source_label"] = _source_label(row.get("source"))
+        if "is_official" not in row:
+            row["is_official"] = _is_official_search_hit(row)
 
     return {
         "results": list(enriched),
@@ -661,8 +693,12 @@ def _search_relevance(query: str, title: str, artist: str, listeners: int = 0) -
 
 
 def _search_sort_key(item: dict) -> tuple:
-    """정확도(관련도) 높은 순 → 인기순."""
+    """오피셜 우선 → 정확도(관련도) → 인기순."""
+    official = item.get("is_official")
+    if official is None:
+        official = _is_official_search_hit(item)
     return (
+        0 if official else 1,
         -float(item.get("relevance", 0) or 0),
         -int(item.get("commercial_score", 0) or 0),
         -int(item.get("listeners", 0) or 0),
@@ -675,7 +711,7 @@ def _is_ytmusic_hit(item: dict) -> bool:
 
 
 def _finalize_search_order(scored: list[dict], fetch_limit: int) -> list[dict]:
-    """정확도(관련도) 높은 순으로 정렬해 상위 N개만 반환."""
+    """오피셜 우선, 그다음 정확도순으로 상위 N개."""
     seen: set[str] = set()
     ordered: list[dict] = []
     for item in sorted(scored, key=_search_sort_key):

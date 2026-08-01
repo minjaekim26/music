@@ -433,7 +433,12 @@ export default function App() {
         }
         const filtered = (data.results || [])
           .filter((t) => (t.relevance ?? 0) > 0)
-          .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0));
+          .sort((a, b) => {
+            const ao = a.is_official === false ? 1 : 0;
+            const bo = b.is_official === false ? 1 : 0;
+            if (ao !== bo) return ao - bo;
+            return (b.relevance ?? 0) - (a.relevance ?? 0);
+          });
         setResults(filtered);
         setSearchMeta(data.meta || null);
         if (!filtered.length) {
