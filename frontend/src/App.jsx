@@ -683,6 +683,14 @@ export default function App() {
           {(recResult?.tracks?.length > 0) && !searching && !recLoading && (
             <div className="border-t border-zinc-900/10 dark:border-white/10">
               <p className="px-3 py-1.5 text-[11px] text-zinc-400">추천 · 유사도순</p>
+              {recResult.recommendation_reason && (
+                <div className="mx-2 mb-2 rounded-xl border border-accent/20 bg-accent/5 px-3 py-2.5">
+                  <p className="text-[10px] font-medium text-accent">AI 추천 설명</p>
+                  <p className="mt-1 text-[12px] leading-relaxed text-zinc-700 dark:text-zinc-300">
+                    {recResult.recommendation_reason}
+                  </p>
+                </div>
+              )}
               <div className="px-2 py-2">
                 <TrackRecommendList
                   tracks={recPagination.slice}
