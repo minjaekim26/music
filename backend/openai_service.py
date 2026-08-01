@@ -7,14 +7,18 @@ OPENAI_API_KEY 미설정 / API 실패 시 None 또는 빈 문자열을 반환하
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
 import httpx
 
+logger = logging.getLogger(__name__)
+
 _OPENAI_BASE = "https://api.openai.com/v1"
 _EMBED_MODEL = "text-embedding-3-small"
-_CHAT_MODEL = "gpt-4.1-mini"
+# taste_analysis.py 와 동일한 기본 모델 (gpt-4.1-mini 는 계정/플랜에 따라 404)
+_CHAT_MODEL = "gpt-4o-mini"
 _MAX_REASON_TRACKS = 5  # GPT에 넘길 트랙 수 상한
 
 
@@ -122,7 +126,13 @@ def _build_reason_prompt(user_query: str, tracks: list[dict]) -> str:
         title = t.get("title", "")
         artist = t.get("artist", "")
         tags = ", ".join((t.get("genre_tags") or [])[:4])
-        reasons = "; ".join((t.get("recommendation_reasons") or [])[:2])
+        # music_api 는 reasons / reason 필드를 사용
+        reason_list = t.get("reasons") or t.get("recommendation_reasons") or []
+        if isinstance(reason_list, str):
+            reason_list = [reason_list]
+        reasons = "; ".join(reason_list[:2])
+        if not reasons and t.get("reason"):
+            reasons = str(t.get("reason"))
         line = f"{i}. {title} — {artist}"
         if tags:
             line += f"  [장르: {tags}]"
@@ -158,7 +168,12 @@ async def generate_recommendation_reason(
     if not is_configured() or not tracks:
         return ""
 
-    model = os.getenv("OPENAI_CHAT_MODEL", _CHAT_MODEL)
+    # OPENAI_CHAT_MODEL → OPENAI_MODEL → gpt-4o-mini (taste_analysis 와 통일)
+    model = (
+        os.getenv("OPENAI_CHAT_MODEL", "").strip()
+        or os.getenv("OPENAI_MODEL", "").strip()
+        or _CHAT_MODEL
+    )
     prompt = _build_reason_prompt(user_query, tracks)
 
     try:
@@ -183,8 +198,16 @@ async def generate_recommendation_reason(
             },
             timeout=30.0,
         )
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            logger.warning(
+                "OpenAI chat failed: status=%s body=%s",
+                resp.status_code,
+                resp.text[:300],
+            )
+            return ""
         data: Any = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
-    except Exception:
+        content = data["choices"][0]["message"].get("content") or ""
+        return content.strip()
+    except Exception as exc:
+        logger.warning("OpenAI recommendation_reason failed: %s", exc)
         return ""
