@@ -41,7 +41,7 @@ function buildSubgenreNodes(nodes, matched, subgenreNodes) {
   return merged.size > 0 ? [...merged.values()] : [];
 }
 
-export default function GenreMap({ genreMap }) {
+export default function GenreMap({ genreMap, onGenreClick }) {
   const trackPosition = genreMap?.track_position || genreMap?.trackPosition;
   const { nodes, matchedGenres, bounds, subgenre_nodes: subgenreNodes } = genreMap || {};
   const matched = matchedGenres || genreMap?.matched_genres || [];
@@ -93,7 +93,11 @@ export default function GenreMap({ genreMap }) {
       <div className="border-b border-zinc-900/10 px-4 py-2.5 dark:border-white/5">
         <h3 className="font-display text-sm font-semibold text-zinc-900 dark:text-white">장르 맵</h3>
         <p className="mt-0.5 text-[11px] text-zinc-500">
-          {focusMode ? "이 곡 장르 주변의 하위 장르" : "장르 위치"}
+          {focusMode
+            ? onGenreClick
+              ? "장르를 클릭하면 해당 스타일 추천"
+              : "이 곡 장르 주변의 하위 장르"
+            : "장르 위치"}
         </p>
         {focusMode && (
           <div className="mt-2 flex flex-wrap gap-2 text-[10px]">
@@ -122,6 +126,7 @@ export default function GenreMap({ genreMap }) {
         showAll
         focusMode={focusMode}
         fitToView={focusMode}
+        onSelect={onGenreClick ? (node) => onGenreClick(node.name) : undefined}
       />
     </div>
   );

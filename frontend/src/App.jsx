@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import GenreMap from "./components/GenreMap.jsx";
 import GenreBars from "./components/GenreBars.jsx";
 import GenreExplorer from "./components/GenreExplorer.jsx";
+import HomeGenreMap from "./components/HomeGenreMap.jsx";
 import HelpPanel from "./components/HelpPanel.jsx";
 import Hero from "./components/Hero.jsx";
 import LoadingSteps from "./components/LoadingSteps.jsx";
@@ -269,7 +270,7 @@ function TrackDetail({
       </div>
 
       <section className="grid gap-6 lg:grid-cols-2">
-        <GenreMap genreMap={detail.genre_map} />
+        <GenreMap genreMap={detail.genre_map} onGenreClick={onGenreSelect} />
         <GenreBars
           genres={detail.genre_map?.matched_genres}
           title="분류 장르 유사도"
@@ -763,15 +764,15 @@ export default function App() {
           </div>
         )}
 
-        <div className="flex justify-center pb-2">
-          <button
-            type="button"
-            onClick={() => setGenreExplorerOpen(true)}
-            className="text-sm text-zinc-500 transition hover:text-zinc-900 dark:hover:text-white"
-          >
-            장르 맵
-          </button>
-        </div>
+        <HomeGenreMap
+          nodes={genreMapNodes}
+          bounds={genreMapBounds}
+          selectedGenres={pickedGenres}
+          onToggleGenre={togglePickedGenre}
+          onOpenFull={() => setGenreExplorerOpen(true)}
+          onRecommend={recommendPickedGenres}
+          loading={loadingPickedRecs}
+        />
       </div>
 
       <GenreExplorer
