@@ -731,6 +731,43 @@ export default function App() {
           </div>
         )}
 
+        <div className="flex justify-center pb-2">
+          <button
+            type="button"
+            onClick={() => setGenreExplorerOpen(true)}
+            className="text-sm text-zinc-500 transition hover:text-zinc-900 dark:hover:text-white"
+          >
+            장르 맵
+          </button>
+        </div>
+      </div>
+
+      <GenreExplorer
+        open={genreExplorerOpen}
+        nodes={genreMapNodes}
+        bounds={genreMapBounds}
+        selectedGenres={pickedGenres}
+        onToggleGenre={togglePickedGenre}
+        onClose={() => setGenreExplorerOpen(false)}
+        onRecommend={recommendPickedGenres}
+        loading={loadingPickedRecs}
+      />
+
+      {error && (
+        <div className="mx-auto mb-6 max-w-2xl rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-800 dark:text-red-200">
+          {error}
+        </div>
+      )}
+
+      <main className="mx-auto max-w-4xl space-y-4">
+        <TrackDetail
+          detail={detail}
+          loading={loadingDetail}
+          onSimilarSelect={handleSimilarSelect}
+          onGenreSelect={handleGenreSelect}
+          selectedGenre={selectedGenre}
+        />
+
         {(detail?.similar_tracks?.length > 0 ||
           genreRecommendations.length > 0 ||
           loadingGenreRecs) && (
@@ -763,43 +800,6 @@ export default function App() {
             </div>
           </div>
         )}
-
-        <div className="flex justify-center pb-2">
-          <button
-            type="button"
-            onClick={() => setGenreExplorerOpen(true)}
-            className="text-sm text-zinc-500 transition hover:text-zinc-900 dark:hover:text-white"
-          >
-            장르 맵
-          </button>
-        </div>
-      </div>
-
-      <GenreExplorer
-        open={genreExplorerOpen}
-        nodes={genreMapNodes}
-        bounds={genreMapBounds}
-        selectedGenres={pickedGenres}
-        onToggleGenre={togglePickedGenre}
-        onClose={() => setGenreExplorerOpen(false)}
-        onRecommend={recommendPickedGenres}
-        loading={loadingPickedRecs}
-      />
-
-      {error && (
-        <div className="mx-auto mb-6 max-w-2xl rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-800 dark:text-red-200">
-          {error}
-        </div>
-      )}
-
-      <main className="mx-auto max-w-4xl">
-        <TrackDetail
-          detail={detail}
-          loading={loadingDetail}
-          onSimilarSelect={handleSimilarSelect}
-          onGenreSelect={handleGenreSelect}
-          selectedGenre={selectedGenre}
-        />
       </main>
     </div>
   );
