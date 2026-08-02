@@ -443,8 +443,8 @@ export default function App() {
         const filtered = (data.results || [])
           .filter((t) => (t.relevance ?? 0) > 0)
           .sort((a, b) => {
-            const ao = a.is_official === false ? 1 : 0;
-            const bo = b.is_official === false ? 1 : 0;
+            const ao = a.is_official ? 0 : 1;
+            const bo = b.is_official ? 0 : 1;
             if (ao !== bo) return ao - bo;
             return (b.relevance ?? 0) - (a.relevance ?? 0);
           });

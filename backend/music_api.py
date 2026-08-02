@@ -173,21 +173,60 @@ def _is_cover_or_variant(title: str) -> bool:
         "acoustic version",
         "piano version",
         "guitar version",
+        "lyrics",
+        "lyric video",
+        "visualizer",
+        "8d audio",
+        "extended version",
     )
     return any(word in lowered for word in skip_words)
 
 
+def _is_fan_upload_title(title: str, artist: str) -> bool:
+    """제목에 다른 아티스트명이 박혀 있는 업로드 (예: rizky.rilos - Queen - …)."""
+    title_l = (title or "").lower().strip()
+    artist_l = (artist or "").lower().strip()
+    if not title_l or not artist_l or " - " not in title_l:
+        return False
+    head = title_l.split(" - ", 1)[0].strip()
+    if len(head) < 3 or head in artist_l:
+        return False
+    return head not in artist_l.split()
+
+
+def _has_catalog_id(item: dict) -> bool:
+    return bool(item.get("mbid") or item.get("deezer_id") or item.get("spotify_id"))
+
+
+def _official_rank(item: dict) -> int:
+    """0=카탈로그 오피셜, 1=Last.fm 등, 2=비오피셜."""
+    if not _is_official_search_hit(item):
+        return 2
+    source = (item.get("source") or "").lower()
+    if _has_catalog_id(item) or any(s in source for s in ("musicbrainz", "deezer", "spotify")):
+        return 0
+    return 1
+
+
 def _is_official_search_hit(item: dict) -> bool:
-    """오피셜(스튜디오 원곡) 우선 판별 — 커버/라이브/팬메이드 등은 False."""
+    """오피셜(스튜디오 원곡) 우선 판별 — 커버/라이브/팬메이드·YT 단독은 False."""
     title = item.get("title") or ""
+    artist = item.get("artist") or ""
     if _is_cover_or_variant(title):
         return False
+    if _is_fan_upload_title(title, artist):
+        return False
+
     source = (item.get("source") or "").lower()
-    # YouTube/SoundCloud 단독 히트는 커버·가사 영상일 확률 높음
-    if source in {"ytmusic", "youtube", "soundcloud"} and not item.get("mbid") and not item.get("deezer_id"):
-        # 인기가 매우 높으면 오피셜로 간주
-        if int(item.get("listeners") or 0) < 50_000 and int(item.get("commercial_score") or 0) < 50_000:
-            return False
+    sources = {s.strip() for s in source.split("+") if s.strip()}
+    catalog_sources = {"lastfm", "musicbrainz", "deezer", "spotify"}
+
+    if _has_catalog_id(item):
+        return True
+    if sources & catalog_sources:
+        return True
+    if sources <= {"ytmusic", "youtube", "soundcloud"}:
+        return False
     return True
 
 
@@ -676,13 +715,18 @@ async def search_tracks(
 
     scored.sort(key=_search_sort_key)
     top = _finalize_search_order(scored, fetch_limit * (3 if country_id else 1))
-    enriched = await asyncio.gather(*[_enrich_search_result(client, item) for item in top])
+    enriched = [
+        row
+        for row in await asyncio.gather(*[_enrich_search_result(client, item) for item in top])
+        if not isinstance(row, Exception)
+    ]
+    for row in enriched:
+        row["is_official"] = _is_official_search_hit(row)
+    enriched.sort(key=_search_sort_key)
 
     if country_id:
         filtered = []
         for row in enriched:
-            if isinstance(row, Exception):
-                continue
             tags, artist_country, artist_tags = await _fetch_country_context(client, row)
             if track_matches_country(
                 country_id=country_id,
@@ -694,11 +738,11 @@ async def search_tracks(
             if len(filtered) >= fetch_limit:
                 break
         enriched = filtered
+    else:
+        enriched = enriched[:fetch_limit]
 
     for row in enriched:
         row["source_label"] = _source_label(row.get("source"))
-        if "is_official" not in row:
-            row["is_official"] = _is_official_search_hit(row)
 
     return {
         "results": list(enriched),
@@ -832,15 +876,19 @@ def _search_relevance_self_check() -> None:
     assert queen_studio > queen_fan, (queen_studio, queen_fan)
     assert queen_studio > queen_live, (queen_studio, queen_live)
     assert _search_relevance("korean", "Ditto", "NewJeans", 1_000_000) < 30.0
+    assert _is_official_search_hit({"title": "Bohemian Rhapsody", "artist": "Queen", "source": "lastfm"})
+    assert not _is_official_search_hit(
+        {"title": "Queen - Bohemian Rhapsody", "artist": "rizky.rilos", "source": "ytmusic", "yt_video_id": "x"}
+    )
+    assert _official_rank({"title": "X", "artist": "Y", "source": "deezer", "deezer_id": 1}) < _official_rank(
+        {"title": "Queen - X", "artist": "fan", "source": "ytmusic", "yt_video_id": "z"}
+    )
 
 
 def _search_sort_key(item: dict) -> tuple:
     """오피셜 우선 → 정확도(관련도) → 인기순."""
-    official = item.get("is_official")
-    if official is None:
-        official = _is_official_search_hit(item)
     return (
-        0 if official else 1,
+        _official_rank(item),
         -float(item.get("relevance", 0) or 0),
         -int(item.get("commercial_score", 0) or 0),
         -int(item.get("listeners", 0) or 0),
