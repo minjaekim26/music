@@ -16,7 +16,6 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from audiodb_api import enrich_ui, get_album, search_artist, search_track as adb_search_track
 from country_filter import (
     artist_country_matches,
-    country_search_tag,
     genre_name_matches_country,
     list_countries,
     normalize_country,
@@ -151,9 +150,12 @@ def _is_cover_or_variant(title: str) -> bool:
         "instrumental",
         "cover",
         "remix",
+        "live aid",
         "live at",
         "live from",
         "live version",
+        "(live",
+        " - live",
         "tribute",
         "rendition",
         "8-bit",
@@ -630,11 +632,7 @@ async def search_tracks(
             seen_terms.add(key)
             unique_terms.append(term)
 
-    if country_id:
-        tag = country_search_tag(country_id)
-        if tag and tag.casefold() not in seen_terms:
-            unique_terms.append(tag)
-
+    # Country is filter-only — do not merge tag-top hits into catalog search.
     results: dict[str, dict] = {}
     meta = {
         "lastfm_configured": lf_configured(),
@@ -655,13 +653,21 @@ async def search_tracks(
         for key, value in term_meta.items():
             meta[key] = meta[key] or value
 
-    relevance_queries = unique_terms
+    relevance_queries = [query]
+    seen_rel: set[str] = {query.casefold()}
+    for alt in unique_terms:
+        if alt.casefold() not in seen_rel:
+            seen_rel.add(alt.casefold())
+            relevance_queries.append(alt)
+
     scored: list[dict] = []
     for item in results.values():
-        rel = max(
-            _search_relevance(q, item.get("title", ""), item.get("artist", ""), item.get("listeners", 0))
-            for q in relevance_queries
-        )
+        title = item.get("title", "") or ""
+        artist = item.get("artist", "") or ""
+        listeners = item.get("listeners", 0)
+        rel = _search_relevance(query, title, artist, listeners)
+        for alt in relevance_queries[1:]:
+            rel = max(rel, _search_relevance(alt, title, artist, listeners) * 0.97)
         # 정확도(관련도) 0% 결과는 검색 목록에서 제외
         if rel <= 0:
             continue
@@ -770,21 +776,62 @@ def _search_relevance(query: str, title: str, artist: str, listeners: int = 0) -
     if not q:
         return 0.0
 
-    if title_l == q or artist_l == q:
-        text = 100.0
-    elif title_l.startswith(q) or artist_l.startswith(q):
-        text = 92.0
-    elif f" {q}" in f" {combined}" or combined.startswith(q):
-        text = 84.0
-    elif q in combined:
-        text = 76.0
-    else:
-        parts = [p for p in q.split() if p]
-        hits = sum(1 for p in parts if p in combined)
-        text = (hits / len(parts)) * 72.0 if parts else 50.0
+    text = 0.0
+    if " - " in q:
+        q_artist, q_title = [s.strip() for s in q.split(" - ", 1)]
+        if q_title and q_artist:
+            if q_title in title_l and q_artist in artist_l:
+                text = 99.0
+            elif q_title in title_l and q_artist in title_l and q_artist not in artist_l:
+                text = 68.0
+            elif q_title in title_l:
+                text = 82.0
 
-    pop = min(100.0, math.log10(max(int(listeners or 0), 0) + 1) * 28.0)
-    return round(min(100.0, text * 0.72 + pop * 0.28), 1)
+    if text <= 0:
+        if title_l == q or artist_l == q:
+            text = 100.0
+        elif f"{artist_l} - {title_l}" == q or f"{title_l} - {artist_l}" == q:
+            text = 98.0
+        elif title_l.startswith(q) or artist_l.startswith(q):
+            text = 92.0
+        elif f" {q}" in f" {combined}" or combined.startswith(q):
+            text = 84.0
+        elif q in combined:
+            text = 76.0
+        else:
+            parts = [p for p in q.split() if len(p) > 1]
+            if parts:
+                title_hits = sum(1 for p in parts if p in title_l)
+                artist_hits = sum(1 for p in parts if p in artist_l)
+                combined_hits = sum(1 for p in parts if p in combined)
+                text = (combined_hits / len(parts)) * 72.0
+                if title_hits >= 1 and artist_hits >= 1:
+                    text = max(text, 88.0)
+                elif title_hits == len(parts) and artist_hits == 0:
+                    text = min(text, 70.0)
+            else:
+                text = 50.0
+
+    if re.search(r"\s-\s", title_l) and artist_l and artist_l not in title_l:
+        head = title_l.split(" - ", 1)[0].strip()
+        if head and head in q and head not in artist_l:
+            text *= 0.72
+
+    if _is_cover_or_variant(title):
+        text *= 0.6
+
+    pop = min(100.0, math.log10(max(int(listeners or 0), 0) + 1) * 20.0)
+    return round(min(100.0, text * 0.85 + pop * 0.15), 1)
+
+
+def _search_relevance_self_check() -> None:
+    """ponytail: sanity check for relevance ordering."""
+    queen_studio = _search_relevance("Queen Bohemian Rhapsody", "Bohemian Rhapsody", "Queen", 5_000_000)
+    queen_fan = _search_relevance("Queen Bohemian Rhapsody", "Queen - Bohemian Rhapsody", "rizky.rilos", 1000)
+    queen_live = _search_relevance("Queen Bohemian Rhapsody", "Bohemian Rhapsody (Live Aid)", "Queen", 500_000)
+    assert queen_studio > queen_fan, (queen_studio, queen_fan)
+    assert queen_studio > queen_live, (queen_studio, queen_live)
+    assert _search_relevance("korean", "Ditto", "NewJeans", 1_000_000) < 30.0
 
 
 def _search_sort_key(item: dict) -> tuple:
