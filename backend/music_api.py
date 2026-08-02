@@ -672,7 +672,6 @@ async def search_tracks(
     top = _finalize_search_order(scored, fetch_limit * (3 if country_id else 1))
     enriched = await asyncio.gather(*[_enrich_search_result(client, item) for item in top])
 
-    country_id = normalize_country(country)
     if country_id:
         filtered = []
         for row in enriched:
