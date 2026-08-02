@@ -103,6 +103,59 @@ def _build_reason_prompt(user_query: str, tracks: list[dict]) -> str:
     return "\n".join(lines)
 
 
+async def chat_completion(
+    client: httpx.AsyncClient,
+    messages: list[dict[str, str]],
+) -> tuple[str, str]:
+    """Return (assistant_text, model_name). Raises on missing key; empty string if API error."""
+    if not is_configured():
+        raise ValueError("OpenAI API 키가 설정되지 않았습니다.")
+
+    model = (
+        os.getenv("OPENAI_CHAT_MODEL", "").strip()
+        or os.getenv("OPENAI_MODEL", "").strip()
+        or _CHAT_MODEL
+    )
+    system = {
+        "role": "system",
+        "content": (
+            "당신은 distribution 음악 탐색 앱의 AI 어시스턴트입니다. "
+            "음악 검색, 장르 설명, 아티스트·곡 추천, playlist 아이디어, 취향 상담을 "
+            "친근한 한국어로 도와줍니다. "
+            "앱 기능: 곡/아티스트 검색, Every Noise 장르 맵, 키워드·자연어 취향 추천, 유사곡. "
+            "모르는 정보는 지어내지 말고, 구체적인 검색어나 장르를 제안하세요."
+        ),
+    }
+    payload_messages = [system]
+    for m in messages[-20:]:
+        role = (m.get("role") or "").strip()
+        content = (m.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            payload_messages.append({"role": role, "content": content[:4000]})
+
+    if len(payload_messages) < 2:
+        raise ValueError("메시지가 비어 있습니다.")
+
+    resp = await client.post(
+        f"{_base_url()}/chat/completions",
+        headers=_headers(),
+        json={
+            "model": model,
+            "messages": payload_messages,
+            "max_tokens": 800,
+            "temperature": 0.75,
+        },
+        timeout=60.0,
+    )
+    if resp.status_code >= 400:
+        logger.warning("OpenAI chat failed: %s %s", resp.status_code, resp.text[:300])
+        raise RuntimeError("OpenAI 응답 오류")
+    content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+    if not content:
+        raise RuntimeError("OpenAI가 빈 응답을 반환했습니다.")
+    return content, model
+
+
 async def generate_recommendation_reason(
     client: httpx.AsyncClient,
     user_query: str,

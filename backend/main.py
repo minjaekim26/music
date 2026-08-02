@@ -34,6 +34,15 @@ class TasteAnalyzeBody(BaseModel):
     query: str = Field(..., min_length=1, max_length=500)
 
 
+class ChatMessageBody(BaseModel):
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str = Field(..., min_length=1, max_length=4000)
+
+
+class ChatBody(BaseModel):
+    messages: list[ChatMessageBody] = Field(..., min_length=1, max_length=30)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """서버 시작 시 httpx 클라이언트 1개 생성, 종료 시 connection pool 정리."""
@@ -234,6 +243,26 @@ async def taste_analyze(request: Request, body: TasteAnalyzeBody):
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"AI 분석 요청 실패: {exc}") from exc
     return profile
+
+
+@app.post("/api/chat")
+async def chat(request: Request, body: ChatBody):
+    """OpenAI 챗봇 — 대화 히스토리를 받아 assistant 응답 반환."""
+    client: httpx.AsyncClient = request.app.state.http_client
+    if not openai_service.is_configured():
+        raise HTTPException(status_code=503, detail="OpenAI API 키가 설정되지 않았습니다.")
+    try:
+        reply, model = await openai_service.chat_completion(
+            client,
+            [m.model_dump() for m in body.messages],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"OpenAI 요청 실패: {exc}") from exc
+    return {"reply": reply, "model": model}
 
 
 @app.post("/api/analyze")
