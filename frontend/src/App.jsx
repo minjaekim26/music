@@ -99,7 +99,7 @@ function Chip({ children, variant = "default", onClick, active = false }) {
     variant === "mood"
       ? "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium bg-glow/10 text-pink-700 border-glow/25 dark:bg-glow/15 dark:text-pink-200 dark:border-glow/30"
       : onClick || variant === "genre"
-        ? chipButtonClass(active, { size: "md" })
+        ? chipButtonClass(active, { size: "md", variant: "genre" })
         : "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium bg-zinc-900/5 text-zinc-700 border-zinc-900/10 dark:bg-white/5 dark:text-zinc-300 dark:border-white/10";
 
   if (onClick) {
@@ -120,15 +120,23 @@ function formatNumber(n) {
   return String(v);
 }
 
+function SectionLabel({ children }) {
+  return (
+    <p className="border-l-2 border-accent px-3 py-2 text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
+      {children}
+    </p>
+  );
+}
+
 function SearchResult({ item, active, onSelect }) {
   return (
     <button
       type="button"
       onClick={() => onSelect(item)}
-      className={`group flex w-full items-center gap-4 rounded-2xl border p-3 text-left transition ${
+      className={`group flex w-full items-center gap-4 rounded-2xl border p-3.5 text-left transition ${
         active
-          ? "border-accent bg-accent/15 ring-2 ring-accent/30 shadow-sm shadow-accent/20"
-          : "border-zinc-900/10 bg-white hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+          ? "border-accent bg-accent/15 ring-2 ring-accent/35 shadow-md shadow-accent/15"
+          : "border-zinc-900/10 bg-white hover:border-zinc-300 hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:hover:border-white/20 dark:hover:bg-white/10"
       }`}
     >
       <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-white/5">
@@ -139,20 +147,23 @@ function SearchResult({ item, active, onSelect }) {
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate font-medium text-zinc-900 dark:text-white">{item.title}</p>
-        <p className="truncate text-sm text-zinc-600 dark:text-zinc-400">{item.artist}</p>
-        {item.listeners > 0 && (
-          <p className="text-[11px] text-zinc-500 dark:text-zinc-500">리스너 {formatNumber(item.listeners)}</p>
-        )}
-        {item.source_label && (
-          <p className="text-[10px] text-zinc-400 dark:text-zinc-500">{item.source_label}</p>
+        <p className="truncate text-base font-bold text-zinc-900 dark:text-white">{item.title}</p>
+        <p className="mt-0.5 truncate text-sm font-medium text-zinc-600 dark:text-zinc-300">{item.artist}</p>
+        {(item.listeners > 0 || item.source_label) && (
+          <p className="mt-1 truncate text-[10px] text-zinc-400 dark:text-zinc-500">
+            {item.listeners > 0 && <>리스너 {formatNumber(item.listeners)}</>}
+            {item.listeners > 0 && item.source_label && " · "}
+            {item.source_label}
+          </p>
         )}
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-1">
+      <div className="flex shrink-0 flex-col items-end gap-0.5">
         {item.relevance != null && (
-          <span className="text-[10px] font-medium tabular-nums text-accent">{item.relevance}%</span>
+          <span className="rounded-lg bg-accent/10 px-2 py-0.5 text-sm font-bold tabular-nums text-accent dark:bg-accent/15">
+            {item.relevance}%
+          </span>
         )}
-        {item.duration && <span className="text-xs text-zinc-500 dark:text-zinc-500">{item.duration}</span>}
+        {item.duration && <span className="text-[10px] tabular-nums text-zinc-400">{item.duration}</span>}
       </div>
     </button>
   );
@@ -692,7 +703,7 @@ export default function App() {
                   type="button"
                   disabled={searching || recLoading}
                   onClick={() => handleSearch(undefined, chip)}
-                  className={chipButtonClass(query === chip, { disabled: searching || recLoading })}
+                  className={chipButtonClass(query === chip, { disabled: searching || recLoading, variant: "search" })}
                 >
                   {chip}
                 </button>
@@ -731,7 +742,7 @@ export default function App() {
 
           {results.length > 0 && (
             <div className="border-t border-zinc-900/10 dark:border-white/10">
-              <p className="px-3 py-1.5 text-[11px] text-zinc-400">곡 · 아티스트 · 정확도순</p>
+              <SectionLabel>곡 · 아티스트 · 정확도순</SectionLabel>
               <div className="space-y-1.5 px-2">
                 {searchPagination.slice.map((item) => (
                   <SearchResult
@@ -753,7 +764,7 @@ export default function App() {
 
           {(recResult?.tracks?.length > 0) && !searching && !recLoading && (
             <div className="border-t border-zinc-900/10 dark:border-white/10">
-              <p className="px-3 py-1.5 text-[11px] text-zinc-400">추천 · 유사도순</p>
+              <SectionLabel>추천 · 유사도순</SectionLabel>
               <AiReasonBox
                 className="mx-2 mb-2"
                 similarityMode={
@@ -788,9 +799,9 @@ export default function App() {
         {(pickedGenreRecs.length > 0 || loadingPickedRecs) && (
           <div className="overflow-hidden rounded-2xl border border-zinc-900/10 bg-white dark:border-white/10 dark:bg-white/5">
             {!loadingPickedRecs && (
-              <p className="border-b border-zinc-900/10 px-4 py-2 text-xs font-medium text-zinc-500 dark:border-white/10">
-                장르 모두 포함 · {pickedGenres.join(", ")}
-              </p>
+              <div className="border-b border-zinc-900/10 dark:border-white/10">
+                <SectionLabel>장르 모두 포함 · {pickedGenres.join(", ")}</SectionLabel>
+              </div>
             )}
             {loadingPickedRecs ? (
               <LoadingSteps active compact />

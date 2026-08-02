@@ -340,8 +340,8 @@ export default function EveryNoiseMap({
           top: top + PAD,
           color: node.color,
           fontSize: `${size}px`,
-          fontWeight: hot ? 700 : focusMode ? 600 : 400,
-          opacity: dimmed ? 0.18 : hot ? 1 : focusMode ? 0.92 : 0.85,
+          fontWeight: hot ? 800 : focusMode ? 700 : 500,
+          opacity: dimmed ? 0.15 : hot ? 1 : focusMode ? 0.95 : 0.72,
           textShadow:
             near || focusMode ? "0 1px 2px rgba(0,0,0,0.4), 0 0 10px rgba(0,0,0,0.25)" : undefined,
           transform: near && !inLoupe ? "scale(1.08)" : undefined,

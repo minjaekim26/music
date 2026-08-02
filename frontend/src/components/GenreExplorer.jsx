@@ -3,6 +3,7 @@ import EveryNoiseMap, { computeLocalBounds, normalizeNodesInBounds } from "./Eve
 import { PaginationBar, usePagination } from "./Pagination.jsx";
 import CountryPicker from "./CountryPicker.jsx";
 import { countryLabel } from "../utils/countries.js";
+import GenreRecommendFooter from "./GenreRecommendFooter.jsx";
 import { chipButtonClass } from "../utils/chipButton.js";
 
 function scoreGenreSearchMatch(node, query, contextNode) {
@@ -242,8 +243,8 @@ export default function GenreExplorer({
           </div>
         )}
 
-        <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[1fr_280px]">
-          <div className="relative min-h-0 min-w-0 border-b border-zinc-900/10 lg:border-b-0 lg:border-r dark:border-white/5">
+        <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[1fr_300px]">
+          <div className="relative min-h-0 min-w-0 border-b border-zinc-900/10 p-3 lg:border-b-0 lg:border-r dark:border-white/5">
             {!nodes?.length ? (
               <div className="flex items-center justify-center text-sm text-zinc-500" style={{ height: mapHeight }}>
                 장르 맵 로딩 중...
@@ -266,11 +267,12 @@ export default function GenreExplorer({
             )}
           </div>
 
-          <aside className="max-h-[min(60vh,600px)] space-y-3 overflow-y-auto px-4 py-4">
+          <aside className="flex max-h-[min(60vh,600px)] min-h-0 flex-col lg:max-h-none">
+            <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
             {searchMatches && (
               <div>
-                <h4 className="text-xs font-semibold text-zinc-500">
-                  검색 결과 · {searchMatches.length} (유사도순)
+                <h4 className="border-l-2 border-accent pl-2 text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
+                  검색 결과 · {searchMatches.length}
                 </h4>
                 <div className="mt-2 space-y-1">
                   {genreSearchPagination.slice.map((node) => (
@@ -291,7 +293,7 @@ export default function GenreExplorer({
                       >
                         {node.name}
                       </span>
-                      <span className="shrink-0 text-[10px] tabular-nums text-zinc-400">
+                      <span className="shrink-0 text-[10px] font-semibold tabular-nums text-zinc-400">
                         {node.searchScore}%
                       </span>
                     </button>
@@ -306,47 +308,18 @@ export default function GenreExplorer({
               </div>
             )}
 
-            <div>
-              <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-200">선택</h4>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {selection.length === 0 ? (
-                  <span className="text-sm text-zinc-400">—</span>
-                ) : (
-                  selection.map((g) => (
-                    <button
-                      key={g}
-                      type="button"
-                      onClick={() => onToggleGenre(g)}
-                      className={chipButtonClass(true, { size: "md" })}
-                    >
-                      {g} ×
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={onRecommend}
-              disabled={selection.length === 0 || loading}
-              className="w-full rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-accent"
-            >
-              {loading ? "불러오는 중…" : "모두 포함한 곡 추천받기"}
-            </button>
-
             {!searchQuery && focusedNode && subgenres.length > 0 && (
               <div>
-                <h4 className="text-xs font-semibold text-zinc-500">
+                <h4 className="border-l-2 border-accent pl-2 text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
                   {focusedNode.name} 하위 · {subgenres.length}
                 </h4>
-                <div className="mt-2 flex max-h-36 flex-wrap gap-1 overflow-y-auto">
+                <div className="mt-2 flex max-h-36 flex-wrap gap-1.5 overflow-y-auto">
                   {subgenres.slice(0, 60).map((sg) => (
                     <button
                       key={sg.id}
                       type="button"
                       onClick={() => handleGenreClick(sg)}
-                      className={chipButtonClass(selection.includes(sg.name))}
+                      className={chipButtonClass(selection.includes(sg.name), { variant: "genre" })}
                     >
                       {sg.name}
                     </button>
@@ -354,6 +327,16 @@ export default function GenreExplorer({
                 </div>
               </div>
             )}
+            </div>
+
+            <div className="shrink-0 border-t border-zinc-900/10 bg-zinc-50/90 px-4 py-3 dark:border-white/10 dark:bg-[#0c0c14]/95">
+              <GenreRecommendFooter
+                selection={selection}
+                loading={loading}
+                onRecommend={onRecommend}
+                onToggleGenre={onToggleGenre}
+              />
+            </div>
           </aside>
         </div>
       </div>

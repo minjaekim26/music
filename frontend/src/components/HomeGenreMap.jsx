@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import EveryNoiseMap, { computeLocalBounds, normalizeNodesInBounds } from "./EveryNoiseMap.jsx";
 import CountryPicker from "./CountryPicker.jsx";
 import { countryLabel, sortNodesForCountryPreview } from "../utils/countries.js";
+import GenreRecommendFooter from "./GenreRecommendFooter.jsx";
 import { chipButtonClass } from "../utils/chipButton.js";
 
 function scoreMatch(node, query) {
@@ -100,7 +101,7 @@ export default function HomeGenreMap({
         <button
           type="button"
           onClick={onOpenFull}
-          className="rounded-xl border border-zinc-900/10 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-white/10 dark:text-zinc-200 dark:hover:bg-white/10"
+          className="rounded-xl border border-accent/40 bg-accent/10 px-3.5 py-1.5 text-xs font-semibold text-accent transition hover:bg-accent hover:text-white hover:shadow-md hover:shadow-accent/25 dark:border-accent/50 dark:bg-accent/15 dark:hover:bg-accent"
         >
           전체 맵 열기
         </button>
@@ -153,7 +154,7 @@ export default function HomeGenreMap({
                 key={node.id}
                 type="button"
                 onClick={() => onToggleGenre(node.name)}
-                className={chipButtonClass(selection.includes(node.name))}
+                className={chipButtonClass(selection.includes(node.name), { variant: "genre" })}
               >
                 {node.name}
               </button>
@@ -162,32 +163,13 @@ export default function HomeGenreMap({
         </div>
       )}
 
-      <div className="space-y-3 border-t border-zinc-900/10 px-4 py-3 dark:border-white/10">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-zinc-500">선택</span>
-          {selection.length === 0 ? (
-            <span className="text-xs text-zinc-400">— 검색하거나 맵에서 장르를 클릭하세요</span>
-          ) : (
-            selection.map((g) => (
-              <button
-                key={g}
-                type="button"
-                onClick={() => onToggleGenre(g)}
-                className={chipButtonClass(true, { size: "md" })}
-              >
-                {g} ×
-              </button>
-            ))
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={onRecommend}
-          disabled={selection.length === 0 || loading}
-          className="w-full rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-accent"
-        >
-          {loading ? "불러오는 중…" : "모두 포함한 곡 추천받기"}
-        </button>
+      <div className="border-t border-zinc-900/10 px-4 py-3 dark:border-white/10">
+        <GenreRecommendFooter
+          selection={selection}
+          loading={loading}
+          onRecommend={onRecommend}
+          onToggleGenre={onToggleGenre}
+        />
       </div>
     </div>
   );

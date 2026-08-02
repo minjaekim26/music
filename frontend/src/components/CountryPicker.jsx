@@ -13,7 +13,7 @@ export default function CountryPicker({ value, onChange, compact = false }) {
             key={c.id || "all"}
             type="button"
             onClick={() => onChange(c.id)}
-            className={chipButtonClass(active)}
+            className={chipButtonClass(active, { variant: "country" })}
           >
             {c.label}
           </button>
