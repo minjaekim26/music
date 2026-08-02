@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# id -> filter config (tags + genre-name hints + artist country strings)
 COUNTRIES: dict[str, dict[str, Any]] = {
     "kr": {
         "label": "한국",
@@ -21,19 +20,19 @@ COUNTRIES: dict[str, dict[str, Any]] = {
     },
     "us": {
         "label": "미국",
-        "tags": ["american", "usa", "us"],
+        "tags": ["american", "usa", "united states"],
         "genre_hints": ["american"],
         "artist_countries": ["united states", "usa", "us", "america"],
     },
     "uk": {
         "label": "영국",
-        "tags": ["british", "uk", "english"],
+        "tags": ["british", "uk", "english", "united kingdom"],
         "genre_hints": ["uk ", "british", "english"],
         "artist_countries": ["united kingdom", "uk", "england", "britain", "scotland", "wales"],
     },
     "fr": {
         "label": "프랑스",
-        "tags": ["french", "france", "francais"],
+        "tags": ["french", "france", "francais", "français"],
         "genre_hints": ["french", "francophone", "chanson"],
         "artist_countries": ["france"],
     },
@@ -45,15 +44,15 @@ COUNTRIES: dict[str, dict[str, Any]] = {
     },
     "mx": {
         "label": "멕시코",
-        "tags": ["mexican", "mexico", "mexicana"],
+        "tags": ["mexican", "mexico", "mexicana", "música mexicana"],
         "genre_hints": ["mexican", "mexico", "musica mexicana", "norteno", "banda", "corrido"],
         "artist_countries": ["mexico"],
     },
     "latin": {
         "label": "라틴",
-        "tags": ["latin", "latino", "latina", "reggaeton", "urbano latino"],
+        "tags": ["latin", "latino", "latina", "reggaeton", "urbano latino", "latin pop"],
         "genre_hints": ["latin", "latino", "latina", "reggaeton", "sierreno", "urbano latino"],
-        "artist_countries": [],
+        "artist_countries": ["mexico", "brazil", "brasil", "colombia", "argentina", "puerto rico", "cuba"],
     },
 }
 
@@ -78,16 +77,37 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
 
-def _tag_matches_country(tag: str, country_id: str) -> bool:
+def _tag_variants(country_id: str) -> set[str]:
     cfg = COUNTRIES.get(country_id)
     if not cfg:
-        return True
-    tn = _norm(tag)
+        return set()
+    out: set[str] = set()
+    for hint in cfg["tags"]:
+        h = _norm(hint).replace("-", " ")
+        out.add(h)
+        out.add(h.replace(" ", ""))
+    return out
+
+
+def _strict_tag_matches_country(tag: str, country_id: str) -> bool:
+    """Exact / spacing-variant only — no substring (pop ≠ k-pop, focus ≠ us)."""
+    tn = _norm(tag).replace("-", " ")
     if not tn:
         return False
-    for hint in cfg["tags"]:
-        h = _norm(hint)
-        if tn == h or h in tn or tn in h:
+    tn_compact = tn.replace(" ", "")
+    return tn in _tag_variants(country_id) or tn_compact in _tag_variants(country_id)
+
+
+def _strict_tags_match_any_country(tags: list[str], country_id: str) -> bool:
+    return any(_strict_tag_matches_country(t, country_id) for t in tags)
+
+
+def _conflicting_country_tag(tags: list[str], country_id: str) -> bool:
+    """Another country's tag matches strictly (e.g. japanese while filtering kr)."""
+    for cid in COUNTRIES:
+        if cid == country_id:
+            continue
+        if _strict_tags_match_any_country(tags, cid):
             return True
     return False
 
@@ -97,7 +117,7 @@ def tags_match_country(tags: list[str], country_id: str | None) -> bool:
         return True
     if not tags:
         return False
-    return any(_tag_matches_country(t, country_id) for t in tags)
+    return _strict_tags_match_any_country(tags, country_id)
 
 
 def artist_country_matches(artist_country: str | None, country_id: str | None) -> bool:
@@ -111,7 +131,9 @@ def artist_country_matches(artist_country: str | None, country_id: str | None) -
     ac = _norm(artist_country)
     for hint in cfg["artist_countries"]:
         h = _norm(hint)
-        if h in ac or ac in h:
+        if ac == h or h in ac.split(",") or ac.startswith(h + " ") or ac.endswith(" " + h):
+            return True
+        if len(h) >= 4 and h in ac:
             return True
     return False
 
@@ -121,12 +143,25 @@ def track_matches_country(
     country_id: str | None,
     tags: list[str] | None = None,
     artist_country: str | None = None,
+    artist_tags: list[str] | None = None,
 ) -> bool:
     if not country_id:
         return True
-    if artist_country_matches(artist_country, country_id):
-        return True
-    return tags_match_country(tags or [], country_id)
+
+    track_tags = list(tags or [])
+    performer_tags = list(artist_tags or [])
+    combined = track_tags + performer_tags
+
+    # AudioDB nationality is authoritative when present
+    if artist_country and artist_country.strip():
+        return artist_country_matches(artist_country, country_id)
+
+    # No nationality on file: require strict country tag, reject other-country tags
+    if not combined:
+        return False
+    if _conflicting_country_tag(combined, country_id):
+        return False
+    return _strict_tags_match_any_country(combined, country_id)
 
 
 def genre_name_matches_country(genre_name: str, country_id: str | None) -> bool:
@@ -146,7 +181,6 @@ def genre_name_matches_country(genre_name: str, country_id: str | None) -> bool:
 
 
 def country_search_tag(country_id: str | None) -> str | None:
-    """Primary Last.fm tag to bias search toward a country."""
     if not country_id:
         return None
     cfg = COUNTRIES.get(country_id)

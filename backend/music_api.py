@@ -677,8 +677,13 @@ async def search_tracks(
         for row in enriched:
             if isinstance(row, Exception):
                 continue
-            tags, artist_country = await _fetch_country_context(client, row)
-            if track_matches_country(country_id=country_id, tags=tags, artist_country=artist_country):
+            tags, artist_country, artist_tags = await _fetch_country_context(client, row)
+            if track_matches_country(
+                country_id=country_id,
+                tags=tags,
+                artist_country=artist_country,
+                artist_tags=artist_tags,
+            ):
                 filtered.append(row)
             if len(filtered) >= fetch_limit:
                 break
@@ -706,15 +711,26 @@ async def search_tracks(
 async def _fetch_country_context(
     client: httpx.AsyncClient,
     track: dict,
-) -> tuple[list[str], str | None]:
+) -> tuple[list[str], str | None, list[str]]:
     tags = await _collect_track_genre_tags(client, track)
     artist = (track.get("artist") or "").strip()
     artist_country = None
+    artist_tags: list[str] = []
+
     if artist:
-        adb = await search_artist(client, artist)
+        adb, atags = await asyncio.gather(
+            search_artist(client, artist),
+            get_artist_top_tags(client, artist),
+            return_exceptions=True,
+        )
         if isinstance(adb, dict):
             artist_country = adb.get("strCountry")
-    return tags, artist_country
+        if isinstance(atags, list):
+            for t in atags:
+                if isinstance(t, dict) and t.get("name"):
+                    artist_tags.append(t["name"])
+
+    return tags, artist_country, artist_tags
 
 
 async def _filter_tracks_by_country(
@@ -730,9 +746,17 @@ async def _filter_tracks_by_country(
 
     out: list[dict] = []
     for track in tracks:
-        tags, artist_country = await _fetch_country_context(client, track)
-        if track_matches_country(country_id=country_id, tags=tags, artist_country=artist_country):
-            out.append(track)
+        tags, artist_country, artist_tags = await _fetch_country_context(client, track)
+        if track_matches_country(
+            country_id=country_id,
+            tags=tags,
+            artist_country=artist_country,
+            artist_tags=artist_tags,
+        ):
+            row = dict(track)
+            if artist_country:
+                row["artist_country"] = artist_country
+            out.append(row)
         if limit and len(out) >= limit:
             break
     return out
@@ -2092,27 +2116,9 @@ async def _collect_track_genre_tags(
     return tags
 
 
-def _track_covers_all_genres(
-    required: list[str],
-    *,
-    pool_hits: set[str],
-    track_tags: list[str],
-) -> bool:
-    """
-    Each selected genre must be proven by:
-    - appearing in that genre's Last.fm top-tracks pool, or
-    - an exact/alias match on the track's own tags (not artist tags).
-    """
-    if not required:
-        return False
-    hit_norm = {h.lower() for h in pool_hits}
-    for genre in required:
-        if genre.lower() in hit_norm:
-            continue
-        if _genre_in_tags_strict(genre, track_tags):
-            continue
-        return False
-    return True
+def _track_covers_all_genres(required: list[str], track_tags: list[str]) -> bool:
+    """Every selected genre must appear on the track's own tags."""
+    return _matches_all_genres(required, track_tags)
 
 
 async def recommend_by_genres(
@@ -2209,30 +2215,18 @@ async def recommend_by_genres(
     )
 
     verified: list[dict] = []
-    tag_budget = 80
+    tag_budget = 120
     for key in ranked_keys:
-        if len(verified) >= limit * 2 or tag_budget <= 0:
+        if len(verified) >= limit * 3 or tag_budget <= 0:
             break
-        hits = lf_hits.get(key, set())
-        track = by_key[key]
-
-        # Fast path: in Last.fm top-tracks for every selected genre
-        if len(hits) >= len(cleaned):
-            item = dict(track)
-            item["tag_labels"] = list(cleaned)
-            item["matched_genres"] = list(cleaned)
-            item["and_proof"] = "lf_intersection"
-            verified.append(item)
-            continue
-
         tag_budget -= 1
+        track = by_key[key]
         tags = await _collect_track_genre_tags(client, track)
-        if not _track_covers_all_genres(cleaned, pool_hits=hits, track_tags=tags):
+        if not _track_covers_all_genres(cleaned, tags):
             continue
         item = dict(track)
         item["tag_labels"] = tags
         item["matched_genres"] = list(cleaned)
-        item["and_proof"] = "track_tags"
         verified.append(item)
 
     enriched: list[dict] = []
@@ -2248,23 +2242,11 @@ async def recommend_by_genres(
             source_genre=None,
         )
 
-        proof = track.get("and_proof")
         real_tags = list(track.get("tag_labels") or [])
-        hits = lf_hits.get(
-            _normalize_key(track.get("title", ""), track.get("artist", "")),
-            set(),
-        )
-        if proof != "lf_intersection" and not _track_covers_all_genres(
-            cleaned, pool_hits=hits, track_tags=real_tags
-        ):
+        if not _track_covers_all_genres(cleaned, real_tags):
             continue
 
-        # Show real tags; for LF intersection, keep selected genres visible
-        if proof == "lf_intersection":
-            item["genre_tags"] = list(dict.fromkeys([*cleaned, *(item.get("genre_tags") or [])]))[:8]
-        else:
-            item["genre_tags"] = real_tags[:8]
-
+        item["genre_tags"] = real_tags[:8]
         display = [_display_genre(g) for g in cleaned]
         item = _attach_recommendation_reasons(
             item,
