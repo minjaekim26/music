@@ -14,6 +14,7 @@ import { classifySearchQuery } from "./utils/searchIntent.js";
 import { chipButtonClass } from "./utils/chipButton.js";
 import InfoTooltip from "./components/InfoTooltip.jsx";
 import { SIMILARITY_TOOLTIPS } from "./utils/similarityHelp.js";
+import ChatFab from "./components/ChatFab.jsx";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
@@ -896,6 +897,7 @@ export default function App() {
           </div>
         )}
       </main>
+      <ChatFab />
     </div>
   );
 }
