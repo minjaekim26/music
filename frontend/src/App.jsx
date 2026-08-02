@@ -745,7 +745,7 @@ export default function App() {
           <div className="overflow-hidden rounded-2xl border border-zinc-900/10 bg-white dark:border-white/10 dark:bg-white/5">
             {!loadingPickedRecs && (
               <p className="border-b border-zinc-900/10 px-4 py-2 text-xs font-medium text-zinc-500 dark:border-white/10">
-                장르 추천 · {pickedGenres.join(", ")}
+                장르 모두 포함 · {pickedGenres.join(", ")}
               </p>
             )}
             {loadingPickedRecs ? (

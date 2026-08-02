@@ -221,3 +221,20 @@ async def get_top_tracks_by_tag(client: httpx.AsyncClient, tag: str, limit: int 
 async def get_artist_top_tags(client: httpx.AsyncClient, artist: str) -> list[dict]:
     data = await _call(client, "artist.getTopTags", artist=artist)
     return _parse_tags(data.get("toptags"))
+
+
+async def get_track_top_tags(
+    client: httpx.AsyncClient,
+    *,
+    artist: str,
+    track: str,
+    mbid: str | None = None,
+) -> list[dict]:
+    params: dict[str, Any] = {}
+    if mbid:
+        params["mbid"] = mbid
+    else:
+        params["artist"] = artist
+        params["track"] = track
+    data = await _call(client, "track.getTopTags", **params)
+    return _parse_tags(data.get("toptags"))

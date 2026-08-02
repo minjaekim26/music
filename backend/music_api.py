@@ -28,6 +28,7 @@ from lastfm_api import (
     get_similar_tracks as lf_similar,
     get_top_tracks_by_tag,
     get_track_info as lf_track_info,
+    get_track_top_tags,
     is_configured as lf_configured,
     search_tracks as lf_search,
 )
@@ -1938,6 +1939,75 @@ async def recommend_by_genre(
     }
 
 
+def _genre_in_tags(genre: str, tags: list[str]) -> bool:
+    kn = _simplify(genre)
+    if not kn:
+        return False
+    for tag in tags:
+        tn = _simplify(tag)
+        if not tn:
+            continue
+        if kn == tn or kn in tn or tn in kn or _token_overlap(genre, tag) >= 0.5:
+            return True
+    return False
+
+
+def _matches_all_genres(required: list[str], tags: list[str]) -> bool:
+    if not required:
+        return False
+    return all(_genre_in_tags(g, tags) for g in required)
+
+
+async def _collect_track_genre_tags(
+    client: httpx.AsyncClient,
+    track: dict,
+) -> list[str]:
+    """Gather genre/tag labels for AND filtering before full enrichment."""
+    title = (track.get("title") or "").strip()
+    artist = (track.get("artist") or "").strip()
+    if not title or not artist:
+        return []
+
+    tags: list[str] = []
+    seen: set[str] = set()
+
+    def add(name: str) -> None:
+        text = (name or "").strip()
+        if not text:
+            return
+        key = text.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        tags.append(text)
+
+    for raw in track.get("matched_genres") or []:
+        add(raw)
+
+    info, artist_tags, track_tags = await asyncio.gather(
+        lf_track_info(client, artist=artist, track=title, mbid=track.get("mbid")),
+        get_artist_top_tags(client, artist),
+        get_track_top_tags(client, artist=artist, track=title, mbid=track.get("mbid")),
+        return_exceptions=True,
+    )
+
+    if isinstance(info, dict):
+        for t in info.get("tags") or []:
+            if isinstance(t, dict):
+                add(t.get("name", ""))
+            else:
+                add(str(t))
+    for block in (artist_tags, track_tags):
+        if isinstance(block, list):
+            for t in block:
+                if isinstance(t, dict):
+                    add(t.get("name", ""))
+                else:
+                    add(str(t))
+
+    return tags
+
+
 async def recommend_by_genres(
     client: httpx.AsyncClient,
     genres: list[str],
@@ -1951,27 +2021,62 @@ async def recommend_by_genres(
     if not cleaned:
         raise ValueError("장르를 1개 이상 선택해 주세요.")
 
+    if len(cleaned) == 1:
+        single = await recommend_by_genre(
+            client,
+            cleaned[0],
+            exclude_title=exclude_title,
+            exclude_artist=exclude_artist,
+            limit=limit,
+        )
+        return {
+            "genres": cleaned,
+            "genre_profile": single.get("genre_profile"),
+            "tracks": single.get("tracks", []),
+            "match_mode": "all",
+        }
+
     exclude_key = _normalize_key(exclude_title or "", exclude_artist or "") if exclude_title else None
     weights = [3.0] + [2.0] * (len(cleaned) - 1)
     base_profile = build_genre_profile(cleaned, weights)
     base_tags = cleaned
+    per_genre_limit = max(limit * 4, 24)
 
-    # Collect candidates per genre from Last.fm tag tops and Deezer genre search
-    candidates: list[dict] = []
+    # key -> track + which selected genres it appeared under
+    by_key: dict[str, dict] = {}
+    genre_hits: dict[str, set[str]] = {}
+
+    def _register(track: dict, genre: str) -> None:
+        key = _normalize_key(track.get("title", ""), track.get("artist", ""))
+        if not key or (exclude_key and key == exclude_key):
+            return
+        if key not in by_key:
+            by_key[key] = dict(track)
+            genre_hits[key] = set()
+        genre_hits[key].add(genre.lower())
+        matched = by_key[key].setdefault("matched_genres", [])
+        if genre not in matched:
+            matched.append(genre)
+
     if lf_configured():
-        tasks = [get_top_tracks_by_tag(client, g, limit=limit + 6) for g in cleaned]
+        tasks = [get_top_tracks_by_tag(client, g, limit=per_genre_limit) for g in cleaned]
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        for res in results:
+        for genre, res in zip(cleaned, results):
             if isinstance(res, list):
-                candidates.extend(res)
+                for track in res:
+                    _register(track, genre)
 
     for g in cleaned:
         try:
-            dz_data = await _dz_get(client, "/search", {"q": f'genre:"{g}"', "limit": str(limit + 6)})
+            dz_data = await _dz_get(
+                client,
+                "/search",
+                {"q": f'genre:"{g}"', "limit": str(per_genre_limit)},
+            )
             for track in dz_data.get("data", []):
                 if _is_cover_or_variant(track.get("title", "")):
                     continue
-                candidates.append(
+                _register(
                     {
                         "title": track.get("title"),
                         "artist": track.get("artist", {}).get("name", ""),
@@ -1979,42 +2084,82 @@ async def recommend_by_genres(
                         "cover": track.get("album", {}).get("cover_medium"),
                         "reason": f"{g} 장르",
                         "lastfm_match": 0,
-                    }
+                    },
+                    g,
                 )
         except httpx.HTTPError:
             continue
 
-    # Unique + exclude
-    seen: set[str] = set()
-    if exclude_key:
-        seen.add(exclude_key)
+    # Prefer tracks that already appeared under every selected genre (pool AND)
+    ranked_keys = sorted(
+        by_key.keys(),
+        key=lambda k: (
+            -len(genre_hits.get(k, ())),
+            -(int(by_key[k].get("listeners") or 0)),
+            -(int(by_key[k].get("playcount") or 0)),
+        ),
+    )
 
-    unique: list[dict] = []
-    for track in candidates:
-        key = _normalize_key(track.get("title", ""), track.get("artist", ""))
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        unique.append(track)
-        if len(unique) >= limit * 3:
+    and_tracks: list[dict] = []
+    checked: set[str] = set()
+
+    for key in ranked_keys:
+        if len(and_tracks) >= limit * 2:
             break
+        track = by_key[key]
+        hits = genre_hits.get(key, set())
+        # Direct intersection: listed under all selected genres
+        if len(hits) >= len(cleaned):
+            track = dict(track)
+            track["matched_genres"] = list(cleaned)
+            and_tracks.append(track)
+            checked.add(key)
+
+    # Tag-level AND for remaining candidates (must include every selected genre)
+    tag_budget = 40
+    for key in ranked_keys:
+        if len(and_tracks) >= limit * 2 or tag_budget <= 0:
+            break
+        if key in checked:
+            continue
+        tag_budget -= 1
+        track = by_key[key]
+        tags = await _collect_track_genre_tags(client, track)
+        if _matches_all_genres(cleaned, tags):
+            track = dict(track)
+            track["matched_genres"] = list(cleaned)
+            track["tag_labels"] = tags
+            and_tracks.append(track)
+            checked.add(key)
 
     enriched: list[dict] = []
-    for track in unique[:limit]:
+    for track in and_tracks[: max(limit * 2, limit)]:
+        if len(enriched) >= limit:
+            break
         item = await _enrich_similar_track(
             client,
             track,
             base_tags,
             base_profile,
             base_genres=cleaned,
-            source_genre=cleaned[0] if len(cleaned) == 1 else None,
+            source_genre=None,
+            matched_keywords=cleaned,
         )
-        if len(cleaned) > 1 and not item.get("reasons"):
-            item = _attach_recommendation_reasons(
-                item,
-                [_display_genre(g) for g in cleaned[:3]],
-            )
+        # Final guard: enriched genre_tags must still cover all selections
+        tag_pool = list(item.get("genre_tags") or []) + list(track.get("tag_labels") or [])
+        tag_pool.extend(track.get("matched_genres") or [])
+        if not _matches_all_genres(cleaned, tag_pool):
+            continue
+
+        display = [_display_genre(g) for g in cleaned]
+        item = _attach_recommendation_reasons(
+            item,
+            [f"선택한 장르 모두 포함 · {', '.join(display[:4])}"],
+        )
         _finalize_genre_rec_item(item, base_tags)
+        # Full-match boost
+        item["similarity"] = round(min(100.0, max(float(item.get("similarity") or 0), 72.0)), 1)
+        item["match_mode"] = "all"
         enriched.append(item)
 
     enriched.sort(key=lambda x: x.get("similarity", 0), reverse=True)
@@ -2023,6 +2168,7 @@ async def recommend_by_genres(
         "genres": cleaned,
         "genre_profile": base_profile,
         "tracks": enriched[:limit],
+        "match_mode": "all",
     }
 
 

@@ -78,7 +78,7 @@ export default function HomeGenreMap({
         <div>
           <h3 className="font-display text-sm font-semibold text-zinc-900 dark:text-white">장르 맵</h3>
           <p className="mt-0.5 text-[11px] text-zinc-500">
-            검색하거나 맵에서 장르를 클릭해 선택하세요
+            여러 장르를 고르면 모두 포함된 곡만 추천합니다
           </p>
         </div>
         <button
@@ -170,7 +170,7 @@ export default function HomeGenreMap({
           disabled={selection.length === 0 || loading}
           className="w-full rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-accent"
         >
-          {loading ? "불러오는 중…" : "선택 장르로 추천받기"}
+          {loading ? "불러오는 중…" : "모두 포함한 곡 추천받기"}
         </button>
       </div>
     </div>

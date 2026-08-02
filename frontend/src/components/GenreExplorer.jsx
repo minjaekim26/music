@@ -306,7 +306,7 @@ export default function GenreExplorer({
               disabled={selection.length === 0 || loading}
               className="w-full rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-accent"
             >
-              {loading ? "불러오는 중…" : "추천받기"}
+              {loading ? "불러오는 중…" : "모두 포함한 곡 추천받기"}
             </button>
 
             {!searchQuery && focusedNode && subgenres.length > 0 && (
