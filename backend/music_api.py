@@ -1939,30 +1939,46 @@ async def recommend_by_genre(
     }
 
 
-def _genre_in_tags(genre: str, tags: list[str]) -> bool:
-    kn = _simplify(genre)
-    if not kn:
+def _norm_genre_label(text: str) -> str:
+    s = _simplify(text or "")
+    return re.sub(r"\s+", " ", s.replace("-", " ")).strip()
+
+
+def _genre_in_tags_strict(genre: str, tags: list[str]) -> bool:
+    """Exact/alias genre match only — no loose substring (pop ≠ k-pop)."""
+    gn = _norm_genre_label(genre)
+    if not gn:
         return False
+    g_compact = gn.replace(" ", "")
+
+    from genre_map import _match_genre_id
+
+    gid = _match_genre_id(genre)
+
     for tag in tags:
-        tn = _simplify(tag)
+        tn = _norm_genre_label(tag)
         if not tn:
             continue
-        if kn == tn or kn in tn or tn in kn or _token_overlap(genre, tag) >= 0.5:
+        if gn == tn or g_compact == tn.replace(" ", ""):
             return True
+        if gid:
+            tid = _match_genre_id(tag)
+            if tid and tid == gid:
+                return True
     return False
 
 
 def _matches_all_genres(required: list[str], tags: list[str]) -> bool:
-    if not required:
+    if not required or not tags:
         return False
-    return all(_genre_in_tags(g, tags) for g in required)
+    return all(_genre_in_tags_strict(g, tags) for g in required)
 
 
 async def _collect_track_genre_tags(
     client: httpx.AsyncClient,
     track: dict,
 ) -> list[str]:
-    """Gather genre/tag labels for AND filtering before full enrichment."""
+    """Gather real genre/tag labels for AND filtering (no selected-genre injection)."""
     title = (track.get("title") or "").strip()
     artist = (track.get("artist") or "").strip()
     if not title or not artist:
@@ -1980,9 +1996,6 @@ async def _collect_track_genre_tags(
             return
         seen.add(key)
         tags.append(text)
-
-    for raw in track.get("matched_genres") or []:
-        add(raw)
 
     info, artist_tags, track_tags = await asyncio.gather(
         lf_track_info(client, artist=artist, track=title, mbid=track.get("mbid")),
@@ -2040,9 +2053,8 @@ async def recommend_by_genres(
     weights = [3.0] + [2.0] * (len(cleaned) - 1)
     base_profile = build_genre_profile(cleaned, weights)
     base_tags = cleaned
-    per_genre_limit = max(limit * 4, 24)
+    per_genre_limit = max(limit * 5, 30)
 
-    # key -> track + which selected genres it appeared under
     by_key: dict[str, dict] = {}
     genre_hits: dict[str, set[str]] = {}
 
@@ -2054,9 +2066,6 @@ async def recommend_by_genres(
             by_key[key] = dict(track)
             genre_hits[key] = set()
         genre_hits[key].add(genre.lower())
-        matched = by_key[key].setdefault("matched_genres", [])
-        if genre not in matched:
-            matched.append(genre)
 
     if lf_configured():
         tasks = [get_top_tracks_by_tag(client, g, limit=per_genre_limit) for g in cleaned]
@@ -2090,7 +2099,7 @@ async def recommend_by_genres(
         except httpx.HTTPError:
             continue
 
-    # Prefer tracks that already appeared under every selected genre (pool AND)
+    # Rank: pool intersection first, then partial hits
     ranked_keys = sorted(
         by_key.keys(),
         key=lambda k: (
@@ -2100,42 +2109,27 @@ async def recommend_by_genres(
         ),
     )
 
-    and_tracks: list[dict] = []
-    checked: set[str] = set()
-
+    # EVERY candidate must pass real tag AND (pool hit is only ranking, not proof)
+    verified: list[dict] = []
+    tag_budget = 60
     for key in ranked_keys:
-        if len(and_tracks) >= limit * 2:
+        if len(verified) >= limit * 2 or tag_budget <= 0:
             break
-        track = by_key[key]
-        hits = genre_hits.get(key, set())
-        # Direct intersection: listed under all selected genres
-        if len(hits) >= len(cleaned):
-            track = dict(track)
-            track["matched_genres"] = list(cleaned)
-            and_tracks.append(track)
-            checked.add(key)
-
-    # Tag-level AND for remaining candidates (must include every selected genre)
-    tag_budget = 40
-    for key in ranked_keys:
-        if len(and_tracks) >= limit * 2 or tag_budget <= 0:
-            break
-        if key in checked:
-            continue
         tag_budget -= 1
         track = by_key[key]
         tags = await _collect_track_genre_tags(client, track)
-        if _matches_all_genres(cleaned, tags):
-            track = dict(track)
-            track["matched_genres"] = list(cleaned)
-            track["tag_labels"] = tags
-            and_tracks.append(track)
-            checked.add(key)
+        if not _matches_all_genres(cleaned, tags):
+            continue
+        item = dict(track)
+        item["tag_labels"] = tags
+        item["matched_genres"] = list(cleaned)
+        verified.append(item)
 
     enriched: list[dict] = []
-    for track in and_tracks[: max(limit * 2, limit)]:
+    for track in verified:
         if len(enriched) >= limit:
             break
+        # Do NOT pass matched_keywords=cleaned — that previously faked genre_tags
         item = await _enrich_similar_track(
             client,
             track,
@@ -2143,21 +2137,19 @@ async def recommend_by_genres(
             base_profile,
             base_genres=cleaned,
             source_genre=None,
-            matched_keywords=cleaned,
         )
-        # Final guard: enriched genre_tags must still cover all selections
-        tag_pool = list(item.get("genre_tags") or []) + list(track.get("tag_labels") or [])
-        tag_pool.extend(track.get("matched_genres") or [])
-        if not _matches_all_genres(cleaned, tag_pool):
+        real_tags = list(track.get("tag_labels") or [])
+        if not _matches_all_genres(cleaned, real_tags):
             continue
 
+        # Keep displayed tags honest: selected genres only if really present
+        item["genre_tags"] = real_tags[:8]
         display = [_display_genre(g) for g in cleaned]
         item = _attach_recommendation_reasons(
             item,
             [f"선택한 장르 모두 포함 · {', '.join(display[:4])}"],
         )
         _finalize_genre_rec_item(item, base_tags)
-        # Full-match boost
         item["similarity"] = round(min(100.0, max(float(item.get("similarity") or 0), 72.0)), 1)
         item["match_mode"] = "all"
         enriched.append(item)
