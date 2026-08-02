@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import EveryNoiseMap, { computeLocalBounds, normalizeNodesInBounds } from "./EveryNoiseMap.jsx";
 import CountryPicker from "./CountryPicker.jsx";
 import { countryLabel, sortNodesForCountryPreview } from "../utils/countries.js";
@@ -33,6 +33,7 @@ export default function HomeGenreMap({
   onOpenFull,
   onRecommend,
   loading,
+  onClearRecommendations,
 }) {
   const [genreSearch, setGenreSearch] = useState("");
   const selection = selectedGenres || [];
@@ -58,6 +59,14 @@ export default function HomeGenreMap({
           a.name.localeCompare(b.name),
       );
   }, [searchQuery, nodes]);
+
+  useEffect(() => {
+    if (!onClearRecommendations) return;
+    const q = genreSearch.trim();
+    if (q && searchMatches && searchMatches.length === 0) {
+      onClearRecommendations();
+    }
+  }, [genreSearch, searchMatches, onClearRecommendations]);
 
   const { displayNodes, displayBounds } = useMemo(() => {
     if (!nodes?.length) return { displayNodes: [], displayBounds: bounds };

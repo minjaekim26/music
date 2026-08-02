@@ -571,6 +571,11 @@ export default function App() {
     });
   }
 
+  function clearPickedRecommendations() {
+    setPickedGenreRecs([]);
+    setLoadingPickedRecs(false);
+  }
+
   async function recommendPickedGenres() {
     if (pickedGenres.length === 0) return;
     setLoadingPickedRecs(true);
@@ -787,6 +792,7 @@ export default function App() {
           onToggleGenre={togglePickedGenre}
           onOpenFull={() => setGenreExplorerOpen(true)}
           onRecommend={recommendPickedGenres}
+          onClearRecommendations={clearPickedRecommendations}
           loading={loadingPickedRecs}
         />
       </div>
@@ -801,6 +807,7 @@ export default function App() {
         onToggleGenre={togglePickedGenre}
         onClose={() => setGenreExplorerOpen(false)}
         onRecommend={recommendPickedGenres}
+        onClearRecommendations={clearPickedRecommendations}
         loading={loadingPickedRecs}
       />
 

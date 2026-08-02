@@ -44,6 +44,7 @@ export default function GenreExplorer({
   onClose,
   onRecommend,
   loading,
+  onClearRecommendations,
 }) {
   const [focusedId, setFocusedId] = useState(null);
   const [drillStack, setDrillStack] = useState([]);
@@ -87,6 +88,14 @@ export default function GenreExplorer({
           a.name.localeCompare(b.name),
       );
   }, [searchQuery, basePool, drillRoot]);
+
+  useEffect(() => {
+    if (!onClearRecommendations) return;
+    const q = genreSearch.trim();
+    if (q && searchMatches && searchMatches.length === 0) {
+      onClearRecommendations();
+    }
+  }, [genreSearch, searchMatches, onClearRecommendations]);
 
   const activeSubset = useMemo(() => {
     if (searchMatches) return searchMatches;
