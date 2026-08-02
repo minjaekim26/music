@@ -14,6 +14,15 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from audiodb_api import enrich_ui, get_album, search_artist, search_track as adb_search_track
+from country_filter import (
+    artist_country_matches,
+    country_search_tag,
+    genre_name_matches_country,
+    list_countries,
+    normalize_country,
+    tags_match_country,
+    track_matches_country,
+)
 from genre_map import (
     build_genre_profile,
     collect_subgenre_focus_nodes,
@@ -578,7 +587,13 @@ async def _gather_search_hits(
     return hits, meta
 
 
-async def search_tracks(client: httpx.AsyncClient, query: str, limit: int = 12) -> dict[str, Any]:
+async def search_tracks(
+    client: httpx.AsyncClient,
+    query: str,
+    limit: int = 12,
+    *,
+    country: str | None = None,
+) -> dict[str, Any]:
     query = query.strip()
     if not query:
         return {
@@ -597,6 +612,7 @@ async def search_tracks(client: httpx.AsyncClient, query: str, limit: int = 12) 
         }
 
     fetch_limit = min(max(limit, 1), 20)
+    country_id = normalize_country(country)
     expansion = expand_search_queries(query)
     search_terms = list(expansion["queries"])
 
@@ -613,6 +629,11 @@ async def search_tracks(client: httpx.AsyncClient, query: str, limit: int = 12) 
         if key not in seen_terms:
             seen_terms.add(key)
             unique_terms.append(term)
+
+    if country_id:
+        tag = country_search_tag(country_id)
+        if tag and tag.casefold() not in seen_terms:
+            unique_terms.append(tag)
 
     results: dict[str, dict] = {}
     meta = {
@@ -648,8 +669,22 @@ async def search_tracks(client: httpx.AsyncClient, query: str, limit: int = 12) 
         scored.append({**item, "relevance": rel, "is_official": official})
 
     scored.sort(key=_search_sort_key)
-    top = _finalize_search_order(scored, fetch_limit)
+    top = _finalize_search_order(scored, fetch_limit * (3 if country_id else 1))
     enriched = await asyncio.gather(*[_enrich_search_result(client, item) for item in top])
+
+    country_id = normalize_country(country)
+    if country_id:
+        filtered = []
+        for row in enriched:
+            if isinstance(row, Exception):
+                continue
+            tags, artist_country = await _fetch_country_context(client, row)
+            if track_matches_country(country_id=country_id, tags=tags, artist_country=artist_country):
+                filtered.append(row)
+            if len(filtered) >= fetch_limit:
+                break
+        enriched = filtered
+
     for row in enriched:
         row["source_label"] = _source_label(row.get("source"))
         if "is_official" not in row:
@@ -664,8 +699,44 @@ async def search_tracks(client: httpx.AsyncClient, query: str, limit: int = 12) 
             "query_original": query,
             "query_expanded": unique_terms if unique_terms != [query] else None,
             "alias_matches": expansion["matches"] or None,
+            "country": country_id,
         },
     }
+
+
+async def _fetch_country_context(
+    client: httpx.AsyncClient,
+    track: dict,
+) -> tuple[list[str], str | None]:
+    tags = await _collect_track_genre_tags(client, track)
+    artist = (track.get("artist") or "").strip()
+    artist_country = None
+    if artist:
+        adb = await search_artist(client, artist)
+        if isinstance(adb, dict):
+            artist_country = adb.get("strCountry")
+    return tags, artist_country
+
+
+async def _filter_tracks_by_country(
+    client: httpx.AsyncClient,
+    tracks: list[dict],
+    country: str | None,
+    *,
+    limit: int | None = None,
+) -> list[dict]:
+    country_id = normalize_country(country)
+    if not country_id:
+        return tracks[:limit] if limit else tracks
+
+    out: list[dict] = []
+    for track in tracks:
+        tags, artist_country = await _fetch_country_context(client, track)
+        if track_matches_country(country_id=country_id, tags=tags, artist_country=artist_country):
+            out.append(track)
+        if limit and len(out) >= limit:
+            break
+    return out
 
 
 def _search_relevance(query: str, title: str, artist: str, listeners: int = 0) -> float:
@@ -1870,6 +1941,7 @@ async def recommend_by_genre(
     exclude_title: str | None = None,
     exclude_artist: str | None = None,
     limit: int = 12,
+    country: str | None = None,
 ) -> dict[str, Any]:
     genre = genre.strip()
     if not genre:
@@ -1931,11 +2003,13 @@ async def recommend_by_genre(
         enriched.append(item)
 
     enriched.sort(key=lambda x: x.get("similarity", 0), reverse=True)
+    enriched = await _filter_tracks_by_country(client, enriched, country, limit=limit)
 
     return {
         "genre": genre,
         "genre_profile": genre_profile,
         "tracks": enriched,
+        "country": normalize_country(country),
     }
 
 
@@ -2049,6 +2123,7 @@ async def recommend_by_genres(
     exclude_title: str | None = None,
     exclude_artist: str | None = None,
     limit: int = 12,
+    country: str | None = None,
 ) -> dict[str, Any]:
     cleaned = [g.strip() for g in (genres or []) if (g or "").strip()]
     cleaned = list(dict.fromkeys(cleaned))[:10]
@@ -2068,6 +2143,7 @@ async def recommend_by_genres(
             "genre_profile": single.get("genre_profile"),
             "tracks": single.get("tracks", []),
             "match_mode": "all",
+            "country": normalize_country(country),
         }
 
     exclude_key = _normalize_key(exclude_title or "", exclude_artist or "") if exclude_title else None
@@ -2201,12 +2277,14 @@ async def recommend_by_genres(
         enriched.append(item)
 
     enriched.sort(key=lambda x: x.get("similarity", 0), reverse=True)
+    enriched = await _filter_tracks_by_country(client, enriched, country, limit=limit)
 
     return {
         "genres": cleaned,
         "genre_profile": base_profile,
         "tracks": enriched[:limit],
         "match_mode": "all",
+        "country": normalize_country(country),
     }
 
 
@@ -2322,6 +2400,7 @@ async def recommend_by_keywords(
     keywords: list[str],
     *,
     limit: int = 12,
+    country: str | None = None,
 ) -> dict[str, Any]:
     cleaned = list(dict.fromkeys(k.strip() for k in keywords if (k or "").strip()))[:12]
     if not cleaned:
@@ -2434,6 +2513,8 @@ async def recommend_by_keywords(
             item["similarity_breakdown"]["overall"] = blended
         enriched.append(item)
 
+    enriched = await _filter_tracks_by_country(client, enriched, country, limit=limit)
+
     matched = base_profile.get("genres", [])
     suggestions = [s for s in meta.get("suggestions", []) if s.lower() not in {k.lower() for k in cleaned}]
     for g in matched[:3]:
@@ -2455,4 +2536,5 @@ async def recommend_by_keywords(
             "suggestions": suggestions,
         },
         "tracks": enriched,
+        "country": normalize_country(country),
     }

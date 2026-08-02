@@ -86,11 +86,21 @@ async def genre_map():
     return get_static_genre_map()
 
 
+@app.get("/api/countries")
+async def countries():
+    return {"countries": list_countries()}
+
+
 @app.get("/api/search")
-async def search(request: Request, q: str = Query(..., min_length=1), limit: int = 12):
+async def search(
+    request: Request,
+    q: str = Query(..., min_length=1),
+    limit: int = 12,
+    country: str | None = Query(None, description="국가 필터 (kr, jp, us, uk, fr, br, mx, latin)"),
+):
     client: httpx.AsyncClient = request.app.state.http_client
     try:
-        payload = await search_tracks(client, q, limit=min(max(limit, 1), 20))
+        payload = await search_tracks(client, q, limit=min(max(limit, 1), 20), country=country)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"음악 API 요청 실패: {exc}") from exc
     return {"query": q, **payload}
@@ -137,6 +147,7 @@ async def genre_recommendations(
     exclude_title: str | None = Query(None, description="제외할 곡 제목"),
     exclude_artist: str | None = Query(None, description="제외할 아티스트"),
     limit: int = 12,
+    country: str | None = Query(None, description="국가 필터"),
 ):
     client: httpx.AsyncClient = request.app.state.http_client
     try:
@@ -146,6 +157,7 @@ async def genre_recommendations(
             exclude_title=exclude_title,
             exclude_artist=exclude_artist,
             limit=min(max(limit, 1), 20),
+            country=country,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -162,6 +174,7 @@ async def genres_recommendations(
     exclude_title: str | None = Query(None, description="제외할 곡 제목"),
     exclude_artist: str | None = Query(None, description="제외할 아티스트"),
     limit: int = 12,
+    country: str | None = Query(None, description="국가 필터"),
 ):
     client: httpx.AsyncClient = request.app.state.http_client
     try:
@@ -171,6 +184,7 @@ async def genres_recommendations(
             exclude_title=exclude_title,
             exclude_artist=exclude_artist,
             limit=min(max(limit, 1), 20),
+            country=country,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -185,6 +199,7 @@ async def keyword_recommendations(
     request: Request,
     keywords: list[str] = Query(..., description="키워드 목록 (keywords=rock&keywords=dreamy)"),
     limit: int = 12,
+    country: str | None = Query(None, description="국가 필터"),
 ):
     client: httpx.AsyncClient = request.app.state.http_client
     try:
@@ -192,6 +207,7 @@ async def keyword_recommendations(
             client,
             keywords,
             limit=min(max(limit, 1), 50),
+            country=country,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -257,6 +273,7 @@ async def taste_recommendations(
     request: Request,
     query: str = Query(..., min_length=1, description="자연어 취향 설명"),
     limit: int = 12,
+    country: str | None = Query(None, description="국가 필터"),
 ):
     """자연어 취향 분석 후 키워드 기반 추천."""
     client: httpx.AsyncClient = request.app.state.http_client
@@ -269,6 +286,7 @@ async def taste_recommendations(
             client,
             keywords,
             limit=min(max(limit, 1), 50),
+            country=country,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

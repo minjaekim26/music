@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import EveryNoiseMap, { computeLocalBounds, normalizeNodesInBounds } from "./EveryNoiseMap.jsx";
 import { PaginationBar, usePagination } from "./Pagination.jsx";
+import CountryPicker from "./CountryPicker.jsx";
+import { countryLabel, genreMatchesCountry } from "../utils/countries.js";
 
 function scoreGenreSearchMatch(node, query, contextNode) {
   const name = node.name.toLowerCase();
@@ -36,6 +38,8 @@ export default function GenreExplorer({
   nodes,
   bounds,
   selectedGenres,
+  selectedCountry,
+  onCountryChange,
   onToggleGenre,
   onClose,
   onRecommend,
@@ -46,7 +50,13 @@ export default function GenreExplorer({
   const [genreSearch, setGenreSearch] = useState("");
   const selection = selectedGenres || [];
 
-  const byId = useMemo(() => new Map((nodes || []).map((n) => [n.id, n])), [nodes]);
+  const filteredNodes = useMemo(() => {
+    if (!nodes?.length || !selectedCountry) return nodes || [];
+    const matched = nodes.filter((n) => genreMatchesCountry(n.name, selectedCountry));
+    return matched.length > 0 ? matched : nodes;
+  }, [nodes, selectedCountry]);
+
+  const byId = useMemo(() => new Map((filteredNodes || []).map((n) => [n.id, n])), [filteredNodes]);
 
   const drillRootId = drillStack.length > 0 ? drillStack[drillStack.length - 1] : null;
   const drillRoot = drillRootId ? byId.get(drillRootId) : null;
@@ -61,12 +71,12 @@ export default function GenreExplorer({
   }, [open]);
 
   const basePool = useMemo(() => {
-    if (!nodes?.length) return [];
-    if (!drillRoot) return nodes;
+    if (!filteredNodes?.length) return [];
+    if (!drillRoot) return filteredNodes;
     const childIds = drillRoot.children || [];
     const childNodes = childIds.map((id) => byId.get(id)).filter(Boolean);
     return childNodes.length > 0 ? [drillRoot, ...childNodes] : [drillRoot];
-  }, [nodes, drillRoot, byId]);
+  }, [filteredNodes, drillRoot, byId]);
 
   const searchMatches = useMemo(() => {
     if (!searchQuery) return null;
@@ -87,16 +97,16 @@ export default function GenreExplorer({
   const activeSubset = useMemo(() => {
     if (searchMatches) return searchMatches;
     if (drillRoot) return basePool;
-    return nodes || [];
-  }, [searchMatches, drillRoot, basePool, nodes]);
+    return filteredNodes || [];
+  }, [searchMatches, drillRoot, basePool, filteredNodes]);
 
   const displayNodes = useMemo(() => {
-    if (!nodes?.length || !bounds) return nodes || [];
-    if (!searchMatches && !drillRoot) return nodes;
+    if (!filteredNodes?.length || !bounds) return filteredNodes || [];
+    if (!searchMatches && !drillRoot) return filteredNodes;
     if (activeSubset.length === 0) return [];
     const local = computeLocalBounds(activeSubset, bounds);
     return normalizeNodesInBounds(activeSubset, bounds, local);
-  }, [nodes, bounds, searchMatches, drillRoot, activeSubset]);
+  }, [filteredNodes, bounds, searchMatches, drillRoot, activeSubset]);
 
   const displayBounds = useMemo(() => {
     if (!bounds) return bounds;
@@ -187,6 +197,15 @@ export default function GenreExplorer({
           </button>
         </div>
 
+        <div className="shrink-0 border-b border-zinc-900/10 px-4 py-2 dark:border-white/5">
+          <CountryPicker compact value={selectedCountry} onChange={onCountryChange} />
+          {selectedCountry && (
+            <p className="mt-1 text-[10px] text-zinc-500">
+              {countryLabel(selectedCountry)} 장르 위주 · 추천도 같은 국가로 필터
+            </p>
+          )}
+        </div>
+
         {drillStack.length > 0 && !searchQuery && (
           <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-zinc-900/10 px-4 py-2 text-xs dark:border-white/5">
             <button
@@ -221,7 +240,7 @@ export default function GenreExplorer({
 
         <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[1fr_280px]">
           <div className="relative min-h-0 min-w-0 border-b border-zinc-900/10 lg:border-b-0 lg:border-r dark:border-white/5">
-            {!nodes?.length ? (
+            {!filteredNodes?.length ? (
               <div className="flex items-center justify-center text-sm text-zinc-500" style={{ height: mapHeight }}>
                 장르 맵 로딩 중...
               </div>

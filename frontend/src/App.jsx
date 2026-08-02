@@ -3,6 +3,7 @@ import GenreMap from "./components/GenreMap.jsx";
 import GenreBars from "./components/GenreBars.jsx";
 import GenreExplorer from "./components/GenreExplorer.jsx";
 import HomeGenreMap from "./components/HomeGenreMap.jsx";
+import CountryPicker from "./components/CountryPicker.jsx";
 import HelpPanel from "./components/HelpPanel.jsx";
 import Hero from "./components/Hero.jsx";
 import LoadingSteps from "./components/LoadingSteps.jsx";
@@ -12,6 +13,10 @@ import { PaginationBar, usePagination } from "./components/Pagination.jsx";
 import { classifySearchQuery } from "./utils/searchIntent.js";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
+
+function appendCountry(params, country) {
+  if (country) params.set("country", country);
+}
 
 function searchEmptyHint(meta, query) {
   if (!meta) {
@@ -334,6 +339,7 @@ export default function App() {
   const [recResult, setRecResult] = useState(null);
   const [tasteProfile, setTasteProfile] = useState(null);
   const [recLoading, setRecLoading] = useState(false);
+  const [selectedCountry, setSelectedCountry] = useState("");
 
   const searchPagination = usePagination(results);
   const recPagination = usePagination(recResult?.tracks || []);
@@ -427,7 +433,9 @@ export default function App() {
 
     try {
       if (intent.primary === "catalog") {
-        const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(q)}&limit=20`);
+        const params = new URLSearchParams({ q, limit: "20" });
+        appendCountry(params, selectedCountry);
+        const res = await fetch(`${API_BASE}/api/search?${params}`);
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           throw new Error(data.detail || "검색에 실패했습니다.");
@@ -446,9 +454,9 @@ export default function App() {
           setError(`검색 결과가 없습니다. ${searchEmptyHint(data.meta, q)}`);
         }
       } else if (intent.primary === "taste") {
-        const res = await fetch(
-          `${API_BASE}/api/recommend/taste?${new URLSearchParams({ query: q, limit: "30" })}`,
-        );
+        const params = new URLSearchParams({ query: q, limit: "30" });
+        appendCountry(params, selectedCountry);
+        const res = await fetch(`${API_BASE}/api/recommend/taste?${params}`);
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           throw new Error(data.detail || "취향 추천에 실패했습니다.");
@@ -462,6 +470,7 @@ export default function App() {
         const params = new URLSearchParams();
         intent.keywords.forEach((k) => params.append("keywords", k));
         params.set("limit", "30");
+        appendCountry(params, selectedCountry);
         const res = await fetch(`${API_BASE}/api/recommend/keywords?${params}`);
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -532,6 +541,7 @@ export default function App() {
       exclude_artist: detail.artist,
       limit: "12",
     });
+    appendCountry(params, selectedCountry);
 
     try {
       const res = await fetch(`${API_BASE}/api/recommend/genre?${params}`);
@@ -571,6 +581,7 @@ export default function App() {
     if (detail?.title) params.set("exclude_title", detail.title);
     if (detail?.artist) params.set("exclude_artist", detail.artist);
     params.set("limit", "12");
+    appendCountry(params, selectedCountry);
 
     try {
       const res = await fetch(`${API_BASE}/api/recommend/genres?${params}`);
@@ -663,6 +674,9 @@ export default function App() {
               >
                 {searching || recLoading ? "…" : "검색"}
               </button>
+            </div>
+            <div className="border-t border-zinc-900/10 px-3 py-2 dark:border-white/10">
+              <CountryPicker value={selectedCountry} onChange={setSelectedCountry} />
             </div>
           </form>
 
@@ -768,6 +782,8 @@ export default function App() {
           nodes={genreMapNodes}
           bounds={genreMapBounds}
           selectedGenres={pickedGenres}
+          selectedCountry={selectedCountry}
+          onCountryChange={setSelectedCountry}
           onToggleGenre={togglePickedGenre}
           onOpenFull={() => setGenreExplorerOpen(true)}
           onRecommend={recommendPickedGenres}
@@ -780,6 +796,8 @@ export default function App() {
         nodes={genreMapNodes}
         bounds={genreMapBounds}
         selectedGenres={pickedGenres}
+        selectedCountry={selectedCountry}
+        onCountryChange={setSelectedCountry}
         onToggleGenre={togglePickedGenre}
         onClose={() => setGenreExplorerOpen(false)}
         onRecommend={recommendPickedGenres}
