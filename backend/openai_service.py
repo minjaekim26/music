@@ -35,6 +35,31 @@ def _headers() -> dict[str, str]:
     }
 
 
+def _chat_model() -> str:
+    return (
+        os.getenv("OPENAI_CHAT_MODEL", "").strip()
+        or os.getenv("OPENAI_MODEL", "").strip()
+        or _CHAT_MODEL
+    )
+
+
+def _openai_error_detail(resp: httpx.Response) -> str:
+    try:
+        err = resp.json().get("error") or {}
+        msg = str(err.get("message") or "")
+        code = str(err.get("code") or err.get("type") or "")
+    except Exception:
+        msg, code = resp.text[:200], ""
+    low = msg.lower()
+    if resp.status_code == 429 or "quota" in code or "quota" in low or "insufficient_quota" in code:
+        return "OpenAI 사용 한도가 초과됐어요. platform.openai.com에서 결제·플랜을 확인하거나 잠시 후 다시 시도해 주세요."
+    if resp.status_code == 401:
+        return "OpenAI API 키가 올바르지 않습니다."
+    if resp.status_code == 404 or "model" in low:
+        return f"OpenAI 모델 설정 오류입니다. ({msg[:120]})"
+    return f"OpenAI 응답 오류 ({resp.status_code})"
+
+
 async def create_embedding(client: httpx.AsyncClient, text: str) -> list[float] | None:
     if not is_configured() or not text.strip():
         return None
@@ -111,11 +136,7 @@ async def chat_completion(
     if not is_configured():
         raise ValueError("OpenAI API 키가 설정되지 않았습니다.")
 
-    model = (
-        os.getenv("OPENAI_CHAT_MODEL", "").strip()
-        or os.getenv("OPENAI_MODEL", "").strip()
-        or _CHAT_MODEL
-    )
+    model = _chat_model()
     system = {
         "role": "system",
         "content": (
@@ -148,12 +169,31 @@ async def chat_completion(
         timeout=60.0,
     )
     if resp.status_code >= 400:
+        detail = _openai_error_detail(resp)
         logger.warning("OpenAI chat failed: %s %s", resp.status_code, resp.text[:300])
-        raise RuntimeError("OpenAI 응답 오류")
+        raise RuntimeError(detail)
     content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
     if not content:
         raise RuntimeError("OpenAI가 빈 응답을 반환했습니다.")
     return content, model
+
+
+def _genre_fallback_reply(genre: dict[str, Any], tracks: list[dict]) -> str:
+    name = genre.get("name", "이 장르")
+    parent = genre.get("parent_name")
+    kids = ", ".join((genre.get("children") or [])[:4])
+    content = f"**{name}**은(는) Every Noise 장르 맵에 있는 장르예요."
+    if parent:
+        content += f" {parent} 계열에 가깝고,"
+    if kids:
+        content += f" {kids} 등과 연결돼 있어요."
+    if tracks:
+        artists = ", ".join(
+            dict.fromkeys(a for t in tracks[:3] if (a := (t.get("artist") or "").strip()))
+        )
+        if artists:
+            content += f" {artists} 같은 아티스트 곡도 함께 골라 뒀어요."
+    return content
 
 
 _COUNSELOR_SYSTEM = """당신은 distribution 음악 앱의 「AI DJ」입니다.
@@ -203,11 +243,7 @@ async def chat_taste_counseling(
     if not is_configured():
         raise ValueError("OpenAI API 키가 설정되지 않았습니다.")
 
-    model = (
-        os.getenv("OPENAI_CHAT_MODEL", "").strip()
-        or os.getenv("OPENAI_MODEL", "").strip()
-        or _CHAT_MODEL
-    )
+    model = _chat_model()
     context = _build_curation_context(profile, tracks, keywords)
     payload_messages: list[dict[str, str]] = [
         {"role": "system", "content": f"{_COUNSELOR_SYSTEM}\n\n{context}"},
@@ -233,8 +269,12 @@ async def chat_taste_counseling(
         timeout=60.0,
     )
     if resp.status_code >= 400:
+        detail = _openai_error_detail(resp)
         logger.warning("OpenAI counsel chat failed: %s %s", resp.status_code, resp.text[:300])
-        raise RuntimeError("OpenAI 응답 오류")
+        if tracks:
+            user_q = messages[-1].get("content", "") if messages else ""
+            return fallback_recommendation_reason(user_q, tracks), model
+        raise RuntimeError(detail)
     content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
     if not content:
         if tracks:
@@ -284,11 +324,7 @@ async def chat_genre_explanation(
     if not is_configured():
         raise ValueError("OpenAI API 키가 설정되지 않았습니다.")
 
-    model = (
-        os.getenv("OPENAI_CHAT_MODEL", "").strip()
-        or os.getenv("OPENAI_MODEL", "").strip()
-        or _CHAT_MODEL
-    )
+    model = _chat_model()
     context = _build_genre_context(genre, tracks)
     payload_messages: list[dict[str, str]] = [
         {"role": "system", "content": f"{_GENRE_GUIDE_SYSTEM}\n\n{context}"},
@@ -311,17 +347,14 @@ async def chat_genre_explanation(
         timeout=60.0,
     )
     if resp.status_code >= 400:
-        raise RuntimeError("OpenAI 응답 오류")
+        detail = _openai_error_detail(resp)
+        logger.warning("OpenAI genre chat failed: %s %s", resp.status_code, resp.text[:300])
+        if tracks or genre.get("name"):
+            return _genre_fallback_reply(genre, tracks), model
+        raise RuntimeError(detail)
     content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
     if not content:
-        name = genre.get("name", "이 장르")
-        parent = genre.get("parent_name")
-        kids = ", ".join((genre.get("children") or [])[:4])
-        content = f"**{name}**은(는) Every Noise 장르 맵에 있는 장르예요."
-        if parent:
-            content += f" {parent} 계열에 가깝고,"
-        if kids:
-            content += f" {kids} 등과 연결돼 있어요."
+        content = _genre_fallback_reply(genre, tracks)
     return content, model
 
 
@@ -336,11 +369,7 @@ async def generate_recommendation_reason(
     if not is_configured():
         return fallback
 
-    model = (
-        os.getenv("OPENAI_CHAT_MODEL", "").strip()
-        or os.getenv("OPENAI_MODEL", "").strip()
-        or _CHAT_MODEL
-    )
+    model = _chat_model()
     try:
         resp = await client.post(
             f"{_base_url()}/chat/completions",
