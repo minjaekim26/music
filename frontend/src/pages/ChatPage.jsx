@@ -94,7 +94,7 @@ function GenreBriefCard({ genre, onAsk }) {
   );
 }
 
-const COUNTRY_CHIP: Record<string, string> = {
+const COUNTRY_CHIP = {
   kr: "🇰🇷 한국",
   jp: "🇯🇵 일본",
   us: "🇺🇸 미국",
