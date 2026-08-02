@@ -6,9 +6,20 @@ const API_BASE = import.meta.env.VITE_API_BASE || "";
 
 const STARTER_PROMPTS = [
   "비 오는 밤 혼자 듣기 좋은 잔잔한 노래",
-  "공부할 때 집중되는데 가사 없는 느낌",
+  "hyperpop이 뭐야? 쉽게 설명해줘",
   "헤어진 직후 슬프지만 너무 발라드는 싫어",
   "친구들이랑 드라이브할 때 신나는 playlist",
+];
+
+const QUICK_SHORTCUTS = [
+  { emoji: "🌧️", label: "비 오는 날 플레이리스트", query: "비 오는 날 창밖 보며 듣기 좋은 잔잔한 playlist" },
+  { emoji: "🔥", label: "요즘 핫한 트랩", query: "요즘 가장 핫한 trap 장르 곡 추천해줘" },
+  { emoji: "📚", label: "공부할 때 집중", query: "공부할 때 집중되는 lo-fi instrumental 느낌" },
+  { emoji: "🌙", label: "밤 드라이브", query: "밤에 혼자 드라이브할 때 synthwave rnb 분위기" },
+  { emoji: "💔", label: "이별 후 위로", query: "이별 직후 위로되는데 너무 발라드는 아닌 indie" },
+  { emoji: "🎸", label: "k-indie 발견", query: "k-indie 중에서 요즘 숨은 명곡 큐레이션" },
+  { emoji: "🗺️", label: "jazz rap 설명", query: "jazz rap 장르가 뭐야? 맵 기준으로 설명해줘" },
+  { emoji: "⚡", label: "운동용 고에너지", query: "운동할 때 터지는 high energy hip hop" },
 ];
 
 function newChatId() {
@@ -45,6 +56,41 @@ function ChatTrackCard({ track }) {
         {Math.round(track.similarity ?? 0)}%
       </span>
     </a>
+  );
+}
+
+function GenreBriefCard({ genre, onAsk }) {
+  if (!genre?.name) return null;
+  const rows = [
+    genre.parent_name && { label: "상위", items: [genre.parent_name] },
+    genre.children?.length && { label: "하위", items: genre.children.slice(0, 5) },
+    genre.nearby?.length && { label: "인근", items: genre.nearby.slice(0, 4) },
+  ].filter(Boolean);
+
+  return (
+    <div className="mt-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">장르 맵</p>
+      <p className="mt-0.5 text-sm font-semibold" style={{ color: genre.color || undefined }}>
+        {genre.name}
+      </p>
+      {rows.map((row) => (
+        <div key={row.label} className="mt-2">
+          <p className="text-[10px] text-zinc-500">{row.label}</p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {row.items.map((g) => (
+              <button
+                key={g}
+                type="button"
+                onClick={() => onAsk?.(`${g} 장르 설명해줘`)}
+                className="rounded-full border border-zinc-200 px-2 py-0.5 text-[10px] text-zinc-600 hover:border-accent/40 hover:text-accent dark:border-white/10 dark:text-zinc-300"
+              >
+                {g}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -130,6 +176,8 @@ export default function ChatPage() {
         {
           role: "assistant",
           content: data.reply,
+          mode: data.mode || "taste",
+          genre: data.genre,
           tracks: data.tracks || [],
           tasteProfile: data.taste_profile,
           keywords: data.keywords_used,
@@ -229,7 +277,7 @@ export default function ChatPage() {
             </button>
             <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">취향상담소</span>
             <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent">
-              실시간 큐레이션
+              취향 · 장르 · 바로가기
             </span>
           </div>
         </header>
@@ -246,6 +294,8 @@ export default function ChatPage() {
                   상황·기분·키워드를 모호하게 말해도 괜찮아요.
                   <br />
                   AI가 해석해서 곡과 장르를 바로 큐레이션해 드립니다.
+                  <br />
+                  장르 맵 질문(예: «hyperpop이 뭐야?»)도 OK.
                 </p>
                 <div className="mt-8 grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
                   {STARTER_PROMPTS.map((prompt) => (
@@ -287,7 +337,12 @@ export default function ChatPage() {
                       </div>
                       {msg.role === "assistant" && (
                         <>
-                          <TasteChips profile={msg.tasteProfile} keywords={msg.keywords} />
+                          {msg.mode === "genre" && msg.genre && (
+                            <GenreBriefCard genre={msg.genre} onAsk={sendMessage} />
+                          )}
+                          {msg.mode !== "genre" && (
+                            <TasteChips profile={msg.tasteProfile} keywords={msg.keywords} />
+                          )}
                           {msg.tracks?.length > 0 && (
                             <div className="mt-3 space-y-1.5">
                               <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
@@ -312,7 +367,9 @@ export default function ChatPage() {
                   <div className="flex gap-3">
                     <MusicNote3D pulseKey={pulseKey} isThinking size="sm" />
                     <div className="rounded-2xl bg-zinc-100 px-4 py-3 dark:bg-white/10">
-                      <p className="text-xs text-zinc-500">취향 분석 · 곡 큐레이션 중…</p>
+                      <p className="text-xs text-zinc-500">
+                        {loading && messages.length === 0 ? "분석 중…" : "취향 분석 · 큐레이션 중…"}
+                      </p>
                       <span className="mt-2 inline-flex gap-1">
                         <span className="h-2 w-2 animate-bounce rounded-full bg-accent [animation-delay:0ms]" />
                         <span className="h-2 w-2 animate-bounce rounded-full bg-accent [animation-delay:150ms]" />
@@ -330,8 +387,22 @@ export default function ChatPage() {
             <p className="shrink-0 px-4 py-2 text-center text-sm text-red-500">{error}</p>
           )}
 
-          <div className="shrink-0 border-t border-zinc-200 bg-white/80 px-4 py-4 backdrop-blur dark:border-white/10 dark:bg-ink/80">
+          <div className="shrink-0 border-t border-zinc-200 bg-white/80 px-4 py-3 backdrop-blur dark:border-white/10 dark:bg-ink/80">
             <div className="mx-auto max-w-3xl">
+              <div className="mb-2 flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {QUICK_SHORTCUTS.map((s) => (
+                  <button
+                    key={s.label}
+                    type="button"
+                    disabled={loading}
+                    onClick={() => sendMessage(s.query)}
+                    className="flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:border-accent/45 hover:bg-white disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-200 dark:hover:border-accent/40"
+                  >
+                    <span aria-hidden>{s.emoji}</span>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
               <div className="flex items-end gap-2 rounded-2xl border border-zinc-300 bg-white px-3 py-2 shadow-sm focus-within:border-accent/50 dark:border-white/15 dark:bg-[#14141c]">
                 <textarea
                   ref={textareaRef}
@@ -353,7 +424,7 @@ export default function ChatPage() {
                 </button>
               </div>
               <p className="mt-2 text-center text-[11px] text-zinc-400">
-                모호한 표현도 OK · 매 메시지마다 곡·장르를 실시간 큐레이션합니다
+                위 칩은 빠른 큐레이션 · 장르 설명은 «○○ 장르 설명해줘»로 물어보세요
               </p>
             </div>
           </div>

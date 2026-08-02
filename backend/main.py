@@ -25,6 +25,7 @@ from music_api import (
     recommend_by_keywords,
     search_tracks,
 )
+from genre_map import find_genre_for_chat, get_genre_map_context
 from taste_analysis import analyze_taste_query, is_llm_configured, profile_to_keywords
 import track_cache
 import openai_service
@@ -258,8 +259,43 @@ async def chat(request: Request, body: ChatBody):
         raise HTTPException(status_code=400, detail="사용자 메시지가 필요합니다.")
 
     counsel_query = user_texts[-1] if len(user_texts) == 1 else " / ".join(user_texts[-3:])
+    last_query = user_texts[-1]
+
+    def _slim_track(t: dict) -> dict:
+        return {
+            "title": t.get("title"),
+            "artist": t.get("artist"),
+            "cover": t.get("cover"),
+            "similarity": t.get("similarity"),
+            "genre_tags": (t.get("genre_tags") or [])[:4],
+            "spotify_id": t.get("spotify_id"),
+            "deezer_id": t.get("deezer_id"),
+            "mbid": t.get("mbid"),
+        }
 
     try:
+        genre_id = find_genre_for_chat(last_query)
+        if genre_id:
+            genre_ctx = get_genre_map_context(genre_id)
+            rec = await recommend_by_genre(client, genre_ctx["name"], limit=6)
+            tracks = rec.get("tracks") or []
+            reply, model = await openai_service.chat_genre_explanation(
+                client,
+                msgs,
+                genre=genre_ctx,
+                tracks=tracks,
+            )
+            return {
+                "reply": reply,
+                "model": model,
+                "mode": "genre",
+                "genre": genre_ctx,
+                "taste_profile": None,
+                "keywords_used": [genre_ctx["name"]],
+                "matched_genres": rec.get("matched_genres") or [],
+                "tracks": [_slim_track(t) for t in tracks[:8]],
+            }
+
         profile = await analyze_taste_query(client, counsel_query)
         keywords = profile_to_keywords(profile)
         tracks: list[dict] = []
@@ -283,21 +319,10 @@ async def chat(request: Request, body: ChatBody):
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"음악 API 요청 실패: {exc}") from exc
 
-    def _slim_track(t: dict) -> dict:
-        return {
-            "title": t.get("title"),
-            "artist": t.get("artist"),
-            "cover": t.get("cover"),
-            "similarity": t.get("similarity"),
-            "genre_tags": (t.get("genre_tags") or [])[:4],
-            "spotify_id": t.get("spotify_id"),
-            "deezer_id": t.get("deezer_id"),
-            "mbid": t.get("mbid"),
-        }
-
     return {
         "reply": reply,
         "model": model,
+        "mode": "taste",
         "taste_profile": profile,
         "keywords_used": keywords,
         "matched_genres": matched_genres[:6],

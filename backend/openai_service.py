@@ -247,6 +247,84 @@ async def chat_taste_counseling(
     return content, model
 
 
+_GENRE_GUIDE_SYSTEM = """당신은 Every Noise 장르 맵을 아는 음악 가이드입니다.
+
+역할:
+- 제공된 [장르 맵 데이터]만 근거로 해당 장르를 초보자도 이해할 수 있게 한국어로 설명합니다.
+- 첫 줄: 한 문장 요약 (이 장르 한마디로)
+- 이어서: 분위기·대표적 사운드·어떤 때 듣는지 2~3문장
+- 상위·하위·비슷한 장르와의 관계를 자연스럽게 연결 (제공된 목록만 사용)
+- 큐레이션 곡이 있으면 1문장으로 연결하되 곡 제목 나열은 하지 않습니다.
+- 지어낸 역사·아티스트는 쓰지 않습니다."""
+
+
+def _build_genre_context(genre: dict[str, Any], tracks: list[dict]) -> str:
+    lines = [
+        "[장르 맵 데이터]",
+        f"장르: {genre.get('name', '')}",
+        f"상위 장르: {genre.get('parent_name') or '—'}",
+        f"하위 장르: {', '.join(genre.get('children') or []) or '—'}",
+        f"형제/인접: {', '.join(genre.get('siblings') or []) or '—'}",
+        f"맵에서 가까운 장르: {', '.join(genre.get('nearby') or []) or '—'}",
+    ]
+    if tracks:
+        lines.append("이 장르 대표곡 큐레이션:")
+        for i, t in enumerate(tracks[:6], 1):
+            lines.append(f"  {i}. {t.get('title', '')} — {t.get('artist', '')}")
+    return "\n".join(lines)
+
+
+async def chat_genre_explanation(
+    client: httpx.AsyncClient,
+    messages: list[dict[str, str]],
+    *,
+    genre: dict[str, Any],
+    tracks: list[dict],
+) -> tuple[str, str]:
+    if not is_configured():
+        raise ValueError("OpenAI API 키가 설정되지 않았습니다.")
+
+    model = (
+        os.getenv("OPENAI_CHAT_MODEL", "").strip()
+        or os.getenv("OPENAI_MODEL", "").strip()
+        or _CHAT_MODEL
+    )
+    context = _build_genre_context(genre, tracks)
+    payload_messages: list[dict[str, str]] = [
+        {"role": "system", "content": f"{_GENRE_GUIDE_SYSTEM}\n\n{context}"},
+    ]
+    for m in messages[-12:]:
+        role = (m.get("role") or "").strip()
+        content = (m.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            payload_messages.append({"role": role, "content": content[:4000]})
+
+    resp = await client.post(
+        f"{_base_url()}/chat/completions",
+        headers=_headers(),
+        json={
+            "model": model,
+            "messages": payload_messages,
+            "max_tokens": 500,
+            "temperature": 0.65,
+        },
+        timeout=60.0,
+    )
+    if resp.status_code >= 400:
+        raise RuntimeError("OpenAI 응답 오류")
+    content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+    if not content:
+        name = genre.get("name", "이 장르")
+        parent = genre.get("parent_name")
+        kids = ", ".join((genre.get("children") or [])[:4])
+        content = f"**{name}**은(는) Every Noise 장르 맵에 있는 장르예요."
+        if parent:
+            content += f" {parent} 계열에 가깝고,"
+        if kids:
+            content += f" {kids} 등과 연결돼 있어요."
+    return content, model
+
+
 async def generate_recommendation_reason(
     client: httpx.AsyncClient,
     user_query: str,

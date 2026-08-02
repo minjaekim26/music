@@ -392,3 +392,105 @@ def collect_subgenre_focus_nodes(
     out.sort(key=lambda n: (-float(n.get("fontSize") or 0), n.get("name") or ""))
     return out
 
+
+_GENRE_QUESTION_RE = re.compile(
+    r"(뭐야|뭐예요|무엇|설명|알려|알려줘|어떤\s*장르|장르\s*맵|장르맵|이란|란\s*\?|"
+    r"what\s+is|explain|tell\s+me\s+about|describe)",
+    re.I,
+)
+
+
+def is_genre_question(query: str) -> bool:
+    return bool(_GENRE_QUESTION_RE.search(query or ""))
+
+
+def _extract_best_genre_match(query: str) -> str | None:
+    q = _normalize(query)
+    if not q:
+        return None
+
+    stripped = _GENRE_QUESTION_RE.sub(" ", q)
+    stripped = re.sub(r"[?\!\.…]+", " ", stripped)
+    stripped = re.sub(r"\s+", " ", stripped).strip()
+
+    candidates: list[str] = []
+    for text in (stripped, q):
+        if text and text not in candidates:
+            candidates.append(text)
+
+    tokens = re.findall(r"[\w\-]+", stripped or q)
+    for i in range(len(tokens)):
+        for j in range(i + 1, min(i + 5, len(tokens)) + 1):
+            phrase = " ".join(tokens[i:j])
+            if phrase not in candidates:
+                candidates.append(phrase)
+
+    candidates.sort(key=len, reverse=True)
+    for phrase in candidates:
+        gid = _match_genre_id(phrase)
+        if gid:
+            return gid
+    return None
+
+
+def find_genre_for_chat(query: str) -> str | None:
+    """장르 맵 질문이면 genre id, 아니면 None."""
+    q = (query or "").strip()
+    if not q:
+        return None
+    gid = _extract_best_genre_match(q)
+    if not gid:
+        return None
+    if is_genre_question(q) or len(q.split()) <= 5:
+        return gid
+    return None
+
+
+def get_genre_map_context(genre_id: str, *, nearby_limit: int = 5) -> dict[str, Any]:
+    map_nodes = get_genre_map()
+    by_id = {n["id"]: n for n in map_nodes}
+    node = by_id.get(genre_id)
+    if not node:
+        return {}
+
+    parent_id = node.get("parentId")
+    parent_name = by_id[parent_id]["name"] if parent_id and parent_id in by_id else None
+
+    children = [
+        by_id[c]["name"]
+        for c in (node.get("children") or [])[:10]
+        if c in by_id
+    ]
+
+    siblings: list[str] = []
+    if parent_id and parent_id in by_id:
+        for cid in by_id[parent_id].get("children") or []:
+            if cid != genre_id and cid in by_id:
+                siblings.append(by_id[cid]["name"])
+        siblings = siblings[:8]
+
+    nx, ny = float(node.get("x", 0)), float(node.get("y", 0))
+    nearby: list[str] = []
+    ranked: list[tuple[float, str]] = []
+    skip = {genre_id, parent_id} | set(node.get("children") or [])
+    for other in map_nodes:
+        oid = other["id"]
+        if oid in skip:
+            continue
+        dx = float(other.get("x", 0)) - nx
+        dy = float(other.get("y", 0)) - ny
+        ranked.append((math.sqrt(dx * dx + dy * dy), other["name"]))
+    ranked.sort(key=lambda x: x[0])
+    nearby = [name for _, name in ranked[:nearby_limit]]
+
+    return {
+        "id": genre_id,
+        "name": node["name"],
+        "parent_id": parent_id,
+        "parent_name": parent_name,
+        "children": children,
+        "siblings": siblings,
+        "nearby": nearby,
+        "color": node.get("color"),
+    }
+
