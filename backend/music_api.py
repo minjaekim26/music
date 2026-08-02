@@ -1978,7 +1978,7 @@ async def _collect_track_genre_tags(
     client: httpx.AsyncClient,
     track: dict,
 ) -> list[str]:
-    """Gather real genre/tag labels for AND filtering (no selected-genre injection)."""
+    """Track-level tags only (artist tags are too broad for AND matching)."""
     title = (track.get("title") or "").strip()
     artist = (track.get("artist") or "").strip()
     if not title or not artist:
@@ -1997,9 +1997,8 @@ async def _collect_track_genre_tags(
         seen.add(key)
         tags.append(text)
 
-    info, artist_tags, track_tags = await asyncio.gather(
+    info, track_tags = await asyncio.gather(
         lf_track_info(client, artist=artist, track=title, mbid=track.get("mbid")),
-        get_artist_top_tags(client, artist),
         get_track_top_tags(client, artist=artist, track=title, mbid=track.get("mbid")),
         return_exceptions=True,
     )
@@ -2010,15 +2009,37 @@ async def _collect_track_genre_tags(
                 add(t.get("name", ""))
             else:
                 add(str(t))
-    for block in (artist_tags, track_tags):
-        if isinstance(block, list):
-            for t in block:
-                if isinstance(t, dict):
-                    add(t.get("name", ""))
-                else:
-                    add(str(t))
+    if isinstance(track_tags, list):
+        for t in track_tags:
+            if isinstance(t, dict):
+                add(t.get("name", ""))
+            else:
+                add(str(t))
 
     return tags
+
+
+def _track_covers_all_genres(
+    required: list[str],
+    *,
+    pool_hits: set[str],
+    track_tags: list[str],
+) -> bool:
+    """
+    Each selected genre must be proven by:
+    - appearing in that genre's Last.fm top-tracks pool, or
+    - an exact/alias match on the track's own tags (not artist tags).
+    """
+    if not required:
+        return False
+    hit_norm = {h.lower() for h in pool_hits}
+    for genre in required:
+        if genre.lower() in hit_norm:
+            continue
+        if _genre_in_tags_strict(genre, track_tags):
+            continue
+        return False
+    return True
 
 
 async def recommend_by_genres(
@@ -2056,16 +2077,18 @@ async def recommend_by_genres(
     per_genre_limit = max(limit * 5, 30)
 
     by_key: dict[str, dict] = {}
-    genre_hits: dict[str, set[str]] = {}
+    # Only Last.fm tag tops count as reliable pool hits
+    lf_hits: dict[str, set[str]] = {}
 
-    def _register(track: dict, genre: str) -> None:
+    def _register(track: dict, genre: str, *, as_lf_hit: bool) -> None:
         key = _normalize_key(track.get("title", ""), track.get("artist", ""))
         if not key or (exclude_key and key == exclude_key):
             return
         if key not in by_key:
             by_key[key] = dict(track)
-            genre_hits[key] = set()
-        genre_hits[key].add(genre.lower())
+            lf_hits[key] = set()
+        if as_lf_hit:
+            lf_hits[key].add(genre.lower())
 
     if lf_configured():
         tasks = [get_top_tracks_by_tag(client, g, limit=per_genre_limit) for g in cleaned]
@@ -2073,7 +2096,7 @@ async def recommend_by_genres(
         for genre, res in zip(cleaned, results):
             if isinstance(res, list):
                 for track in res:
-                    _register(track, genre)
+                    _register(track, genre, as_lf_hit=True)
 
     for g in cleaned:
         try:
@@ -2085,6 +2108,7 @@ async def recommend_by_genres(
             for track in dz_data.get("data", []):
                 if _is_cover_or_variant(track.get("title", "")):
                     continue
+                # Deezer is discovery only — not proof of genre membership
                 _register(
                     {
                         "title": track.get("title"),
@@ -2095,41 +2119,51 @@ async def recommend_by_genres(
                         "lastfm_match": 0,
                     },
                     g,
+                    as_lf_hit=False,
                 )
         except httpx.HTTPError:
             continue
 
-    # Rank: pool intersection first, then partial hits
     ranked_keys = sorted(
         by_key.keys(),
         key=lambda k: (
-            -len(genre_hits.get(k, ())),
+            -len(lf_hits.get(k, ())),
             -(int(by_key[k].get("listeners") or 0)),
             -(int(by_key[k].get("playcount") or 0)),
         ),
     )
 
-    # EVERY candidate must pass real tag AND (pool hit is only ranking, not proof)
     verified: list[dict] = []
-    tag_budget = 60
+    tag_budget = 80
     for key in ranked_keys:
         if len(verified) >= limit * 2 or tag_budget <= 0:
             break
-        tag_budget -= 1
+        hits = lf_hits.get(key, set())
         track = by_key[key]
+
+        # Fast path: in Last.fm top-tracks for every selected genre
+        if len(hits) >= len(cleaned):
+            item = dict(track)
+            item["tag_labels"] = list(cleaned)
+            item["matched_genres"] = list(cleaned)
+            item["and_proof"] = "lf_intersection"
+            verified.append(item)
+            continue
+
+        tag_budget -= 1
         tags = await _collect_track_genre_tags(client, track)
-        if not _matches_all_genres(cleaned, tags):
+        if not _track_covers_all_genres(cleaned, pool_hits=hits, track_tags=tags):
             continue
         item = dict(track)
         item["tag_labels"] = tags
         item["matched_genres"] = list(cleaned)
+        item["and_proof"] = "track_tags"
         verified.append(item)
 
     enriched: list[dict] = []
     for track in verified:
         if len(enriched) >= limit:
             break
-        # Do NOT pass matched_keywords=cleaned — that previously faked genre_tags
         item = await _enrich_similar_track(
             client,
             track,
@@ -2138,12 +2172,24 @@ async def recommend_by_genres(
             base_genres=cleaned,
             source_genre=None,
         )
+
+        proof = track.get("and_proof")
         real_tags = list(track.get("tag_labels") or [])
-        if not _matches_all_genres(cleaned, real_tags):
+        hits = lf_hits.get(
+            _normalize_key(track.get("title", ""), track.get("artist", "")),
+            set(),
+        )
+        if proof != "lf_intersection" and not _track_covers_all_genres(
+            cleaned, pool_hits=hits, track_tags=real_tags
+        ):
             continue
 
-        # Keep displayed tags honest: selected genres only if really present
-        item["genre_tags"] = real_tags[:8]
+        # Show real tags; for LF intersection, keep selected genres visible
+        if proof == "lf_intersection":
+            item["genre_tags"] = list(dict.fromkeys([*cleaned, *(item.get("genre_tags") or [])]))[:8]
+        else:
+            item["genre_tags"] = real_tags[:8]
+
         display = [_display_genre(g) for g in cleaned]
         item = _attach_recommendation_reasons(
             item,
