@@ -25,6 +25,7 @@ from music_api import (
     recommend_by_keywords,
     search_tracks,
 )
+from country_filter import country_label, infer_country_from_query, normalize_country
 from genre_map import find_genre_for_chat, get_genre_map_context
 from taste_analysis import analyze_taste_query, is_llm_configured, profile_to_keywords
 import llm_config
@@ -277,16 +278,26 @@ async def chat(request: Request, body: ChatBody):
         }
 
     try:
+        chat_country = infer_country_from_query(counsel_query) or infer_country_from_query(last_query)
+
         genre_id = find_genre_for_chat(last_query)
         if genre_id:
             genre_ctx = get_genre_map_context(genre_id)
-            rec = await recommend_by_genre(client, genre_ctx["name"], limit=6)
+            profile_pre = await analyze_taste_query(client, counsel_query)
+            country = profile_pre.get("country") or chat_country
+            rec = await recommend_by_genre(
+                client,
+                genre_ctx["name"],
+                limit=6,
+                country=country,
+            )
             tracks = rec.get("tracks") or []
             reply, model = await openai_service.chat_genre_explanation(
                 client,
                 msgs,
                 genre=genre_ctx,
                 tracks=tracks,
+                country=country,
             )
             return {
                 "reply": reply,
@@ -294,17 +305,21 @@ async def chat(request: Request, body: ChatBody):
                 "mode": "genre",
                 "genre": genre_ctx,
                 "taste_profile": None,
+                "country": country,
                 "keywords_used": [genre_ctx["name"]],
                 "matched_genres": rec.get("matched_genres") or [],
                 "tracks": [_slim_track(t) for t in tracks[:8]],
             }
 
         profile = await analyze_taste_query(client, counsel_query)
+        country = profile.get("country") or chat_country
+        if country and not profile.get("country"):
+            profile = {**profile, "country": country}
         keywords = profile_to_keywords(profile)
         tracks: list[dict] = []
         matched_genres: list[dict] = []
         if keywords:
-            rec = await recommend_by_keywords(client, keywords, limit=8)
+            rec = await recommend_by_keywords(client, keywords, limit=8, country=country)
             tracks = rec.get("tracks") or []
             matched_genres = rec.get("matched_genres") or []
 
@@ -314,6 +329,7 @@ async def chat(request: Request, body: ChatBody):
             profile=profile,
             tracks=tracks,
             keywords=keywords,
+            country=country,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -327,6 +343,7 @@ async def chat(request: Request, body: ChatBody):
         "model": model,
         "mode": "taste",
         "taste_profile": profile,
+        "country": country,
         "keywords_used": keywords,
         "matched_genres": matched_genres[:6],
         "tracks": [_slim_track(t) for t in tracks[:8]],

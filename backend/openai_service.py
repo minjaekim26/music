@@ -203,24 +203,34 @@ def _genre_fallback_reply(genre: dict[str, Any], tracks: list[dict]) -> str:
     return content
 
 
-_COUNSELOR_SYSTEM = """당신은 distribution 음악 앱의 「AI DJ」입니다.
+_COUNSELOR_SYSTEM = """당신은 distribution 음악 앱의 「AI DJ」입니다. Google Gemini처럼 자연스럽고 정확한 한국어로 대화합니다.
 
 역할:
-- 사용자의 모호한 상황·감정·키워드를 듣고 공감한다.
-- 시스템이 실시간으로 큐레이션한 곡·장르를 따뜻한 한국어로 소개한다.
-- 제공된 [큐레이션 결과]의 곡만 추천 근거로 사용한다 (목록에 없는 곡은 지어내지 않는다).
-- 곡을 번호 나열하지 말고, 분위기·상황과 연결된 큐레이션 이야기로 2~4문장 답한다.
-- 곡이 없으면 솔직히 말하고, 다른 표현·상황·장르 힌트를 부드럽게 요청한다.
-- 이전 대화 맥락을 유지하며 follow-up(더 신나게, 더 잔잔하게 등)에 대응한다."""
+- 사용자의 의도(장르, 국가·지역, mood, 상황)를 정확히 이해하고 공감한다.
+- 국가·지역을 명시했으면(예: 한국 트랩, UK drill) 답변 첫 문장에 반드시 반영한다. 지역 없이 장르만 말하지 않는다.
+- [큐레이션 결과]에 나온 곡·키워드·국가 필터만 근거로 사용한다 (목록에 없는 곡·아티스트는 지어내지 않는다).
+- 곡 제목·번호 나열 금지. 분위기·상황과 연결된 큐레이션 이야기 2~4문장.
+- 이전 대화 맥락·follow-up(더 신나게, 더 한국적으로, 더 잔잔하게 등)에 맞춰 조정한다.
+- 곡이 없으면 솔직히 알리고, 다른 표현·장르·지역 힌트를 부드럽게 제안한다."""
 
 
 def _build_curation_context(
     profile: dict[str, Any],
     tracks: list[dict],
     keywords: list[str],
+    *,
+    country: str | None = None,
 ) -> str:
+    from country_filter import COUNTRIES
+
+    country_line = "—"
+    if country and country in COUNTRIES:
+        country_line = f"{COUNTRIES[country]['label']} ({country}) — 해당 국가 아티스트·태그 위주 필터"
+
     lines = [
         "[큐레이션 결과 — 답변에 반드시 반영]",
+        f"사용자 의도: {profile.get('intent_summary') or profile.get('query') or '—'}",
+        f"국가 필터: {country_line}",
         f"분석 mood: {', '.join(profile.get('mood') or []) or '—'}",
         f"분석 genre: {', '.join(profile.get('genre') or []) or '—'}",
         f"tempo: {profile.get('tempo') or '—'}",
@@ -245,13 +255,14 @@ async def chat_taste_counseling(
     profile: dict[str, Any],
     tracks: list[dict],
     keywords: list[str],
+    country: str | None = None,
 ) -> tuple[str, str]:
     """AI DJ — 큐레이션 컨텍스트 + 대화 히스토리로 응답 생성."""
     if not is_configured():
         raise ValueError("AI API 키가 설정되지 않았습니다.")
 
-    model = _chat_model()
-    context = _build_curation_context(profile, tracks, keywords)
+    model = llm_config.counsel_model()
+    context = _build_curation_context(profile, tracks, keywords, country=country or profile.get("country"))
     payload_messages: list[dict[str, str]] = [
         {"role": "system", "content": f"{_COUNSELOR_SYSTEM}\n\n{context}"},
     ]
@@ -270,8 +281,8 @@ async def chat_taste_counseling(
         json={
             "model": model,
             "messages": payload_messages,
-            "max_tokens": 600,
-            "temperature": 0.8,
+            "max_tokens": 750,
+            "temperature": 0.72,
         },
         timeout=60.0,
     )
@@ -294,7 +305,7 @@ async def chat_taste_counseling(
     return content, model
 
 
-_GENRE_GUIDE_SYSTEM = """당신은 Every Noise 장르 맵을 아는 음악 가이드입니다.
+_GENRE_GUIDE_SYSTEM = """당신은 Every Noise 장르 맵을 아는 음악 가이드입니다. Google Gemini처럼 명확하고 친근한 한국어로 설명합니다.
 
 역할:
 - 제공된 [장르 맵 데이터]만 근거로 해당 장르를 초보자도 이해할 수 있게 한국어로 설명합니다.
@@ -305,15 +316,19 @@ _GENRE_GUIDE_SYSTEM = """당신은 Every Noise 장르 맵을 아는 음악 가�
 - 지어낸 역사·아티스트는 쓰지 않습니다."""
 
 
-def _build_genre_context(genre: dict[str, Any], tracks: list[dict]) -> str:
-    lines = [
-        "[장르 맵 데이터]",
+def _build_genre_context(genre: dict[str, Any], tracks: list[dict], *, country: str | None = None) -> str:
+    from country_filter import COUNTRIES
+
+    lines = ["[장르 맵 데이터]"]
+    if country and country in COUNTRIES:
+        lines.append(f"국가 필터: {COUNTRIES[country]['label']} — 큐레이션 곡은 이 지역 위주")
+    lines.extend([
         f"장르: {genre.get('name', '')}",
         f"상위 장르: {genre.get('parent_name') or '—'}",
         f"하위 장르: {', '.join(genre.get('children') or []) or '—'}",
         f"형제/인접: {', '.join(genre.get('siblings') or []) or '—'}",
         f"맵에서 가까운 장르: {', '.join(genre.get('nearby') or []) or '—'}",
-    ]
+    ])
     if tracks:
         lines.append("이 장르 대표곡 큐레이션:")
         for i, t in enumerate(tracks[:6], 1):
@@ -327,12 +342,13 @@ async def chat_genre_explanation(
     *,
     genre: dict[str, Any],
     tracks: list[dict],
+    country: str | None = None,
 ) -> tuple[str, str]:
     if not is_configured():
         raise ValueError("AI API 키가 설정되지 않았습니다.")
 
-    model = _chat_model()
-    context = _build_genre_context(genre, tracks)
+    model = llm_config.counsel_model()
+    context = _build_genre_context(genre, tracks, country=country)
     payload_messages: list[dict[str, str]] = [
         {"role": "system", "content": f"{_GENRE_GUIDE_SYSTEM}\n\n{context}"},
     ]
@@ -348,7 +364,7 @@ async def chat_genre_explanation(
         json={
             "model": model,
             "messages": payload_messages,
-            "max_tokens": 500,
+            "max_tokens": 550,
             "temperature": 0.65,
         },
         timeout=60.0,

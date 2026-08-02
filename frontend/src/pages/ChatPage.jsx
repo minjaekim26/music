@@ -94,15 +94,31 @@ function GenreBriefCard({ genre, onAsk }) {
   );
 }
 
-function TasteChips({ profile, keywords }) {
-  if (!profile && !keywords?.length) return null;
-  const chips = [
-    ...(profile?.mood || []).map((m) => ({ label: m, kind: "mood" })),
-    ...(profile?.genre || []).map((g) => ({ label: g, kind: "genre" })),
-    ...(profile?.tempo ? [{ label: profile.tempo, kind: "tempo" }] : []),
-  ];
-  if (!chips.length && keywords?.length) {
-    keywords.slice(0, 4).forEach((k) => chips.push({ label: k, kind: "kw" }));
+const COUNTRY_CHIP: Record<string, string> = {
+  kr: "🇰🇷 한국",
+  jp: "🇯🇵 일본",
+  us: "🇺🇸 미국",
+  uk: "🇬🇧 영국",
+  fr: "🇫🇷 프랑스",
+  br: "🇧🇷 브라질",
+  mx: "🇲🇽 멕시코",
+  latin: "🌎 라틴",
+};
+
+function TasteChips({ profile, keywords, country }) {
+  const chips = [];
+  const cid = country || profile?.country;
+  if (cid && COUNTRY_CHIP[cid]) {
+    chips.push({ label: COUNTRY_CHIP[cid], kind: "country" });
+  }
+  if (keywords?.length) {
+    keywords.slice(0, 5).forEach((k) => chips.push({ label: k, kind: "kw" }));
+  } else {
+    chips.push(
+      ...(profile?.mood || []).map((m) => ({ label: m, kind: "mood" })),
+      ...(profile?.genre || []).map((g) => ({ label: g, kind: "genre" })),
+      ...(profile?.tempo ? [{ label: profile.tempo, kind: "tempo" }] : []),
+    );
   }
   if (!chips.length) return null;
 
@@ -111,7 +127,11 @@ function TasteChips({ profile, keywords }) {
       {chips.map((c) => (
         <span
           key={`${c.kind}-${c.label}`}
-          className="rounded-full border border-accent/25 bg-accent/10 px-2 py-0.5 text-[10px] text-accent dark:text-violet-200"
+          className={`rounded-full border px-2 py-0.5 text-[10px] ${
+            c.kind === "country"
+              ? "border-teal-500/40 bg-teal-500/10 font-semibold text-teal-700 dark:text-teal-300"
+              : "border-accent/25 bg-accent/10 text-accent dark:text-violet-200"
+          }`}
         >
           {c.label}
         </span>
@@ -181,6 +201,7 @@ export default function ChatPage() {
           tracks: data.tracks || [],
           tasteProfile: data.taste_profile,
           keywords: data.keywords_used,
+          country: data.country,
           matchedGenres: data.matched_genres,
         },
       ]);
@@ -341,7 +362,7 @@ export default function ChatPage() {
                             <GenreBriefCard genre={msg.genre} onAsk={sendMessage} />
                           )}
                           {msg.mode !== "genre" && (
-                            <TasteChips profile={msg.tasteProfile} keywords={msg.keywords} />
+                            <TasteChips profile={msg.tasteProfile} keywords={msg.keywords} country={msg.country} />
                           )}
                           {msg.tracks?.length > 0 && (
                             <div className="mt-3 space-y-1.5">

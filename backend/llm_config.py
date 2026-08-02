@@ -29,6 +29,16 @@ def chat_model() -> str:
     )
 
 
+def counsel_model() -> str:
+    """AI DJ 답변·장르 설명 — 품질 우선 (기본 flash, lite 아님)."""
+    return (
+        os.getenv("OPENAI_COUNSEL_MODEL", "").strip()
+        or os.getenv("OPENAI_CHAT_MODEL", "").strip()
+        or os.getenv("OPENAI_MODEL", "").strip()
+        or "gemini-2.5-flash"
+    )
+
+
 def headers() -> dict[str, str]:
     return {
         "Authorization": f"Bearer {api_key()}",

@@ -433,15 +433,23 @@ def _extract_best_genre_match(query: str) -> str | None:
     return None
 
 
+_CURATION_HINTS = re.compile(
+    r"(골라|추천|playlist|플레이|플리|틀어|들려|curate|recommend|pick|줘|해줘|원해|듣고|들을|뭐\s*들|곡)",
+    re.I,
+)
+
+
 def find_genre_for_chat(query: str) -> str | None:
-    """장르 맵 질문이면 genre id, 아니면 None."""
+    """장르 맵 설명 질문이면 genre id. 곡 큐레이션 요청은 None → taste 파이프라인."""
     q = (query or "").strip()
     if not q:
+        return None
+    if _CURATION_HINTS.search(q):
         return None
     gid = _extract_best_genre_match(q)
     if not gid:
         return None
-    if is_genre_question(q) or len(q.split()) <= 5:
+    if is_genre_question(q):
         return gid
     return None
 

@@ -187,3 +187,26 @@ def country_search_tag(country_id: str | None) -> str | None:
     if not cfg or not cfg["tags"]:
         return None
     return cfg["tags"][0]
+
+
+# ponytail: O(n) substring scan; upgrade path → LLM country field in taste_analysis
+_COUNTRY_QUERY_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("kr", ("한국", "korean", "korea", "k-pop", "kpop", "k pop", "k-hip", "k hip", "k-indie", "k indie", "국내", "한국어", "k-rap", "k rap")),
+    ("jp", ("일본", "japanese", "japan", "j-pop", "jpop", "j pop", "anime", "anison", "j-hip", "j hip")),
+    ("us", ("미국", "american", "usa", "atlanta", "atl rap", "west coast", "east coast")),
+    ("uk", ("영국", "british", "uk ", " uk", "grime", "uk drill", "english rap")),
+    ("fr", ("프랑스", "french", "france", "francais", "français")),
+    ("br", ("브라질", "brazilian", "brazil", "brasil", "funk carioca", "sertanejo")),
+    ("mx", ("멕시코", "mexican", "mexico", "música mexicana", "musica mexicana", "corrido", "banda")),
+    ("latin", ("라틴", "latin", "latino", "latina", "reggaeton", "urbano latino")),
+)
+
+
+def infer_country_from_query(query: str) -> str | None:
+    q = _norm(query)
+    if not q:
+        return None
+    for cid, needles in _COUNTRY_QUERY_HINTS:
+        if any(_norm(n) in q for n in needles):
+            return cid
+    return None
