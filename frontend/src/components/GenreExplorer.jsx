@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import EveryNoiseMap, { computeLocalBounds, normalizeNodesInBounds } from "./EveryNoiseMap.jsx";
 import { PaginationBar, usePagination } from "./Pagination.jsx";
 import CountryPicker from "./CountryPicker.jsx";
-import { countryLabel, genreMatchesCountry } from "../utils/countries.js";
+import { countryLabel } from "../utils/countries.js";
 
 function scoreGenreSearchMatch(node, query, contextNode) {
   const name = node.name.toLowerCase();
@@ -50,13 +50,7 @@ export default function GenreExplorer({
   const [genreSearch, setGenreSearch] = useState("");
   const selection = selectedGenres || [];
 
-  const filteredNodes = useMemo(() => {
-    if (!nodes?.length || !selectedCountry) return nodes || [];
-    const matched = nodes.filter((n) => genreMatchesCountry(n.name, selectedCountry));
-    return matched.length > 0 ? matched : nodes;
-  }, [nodes, selectedCountry]);
-
-  const byId = useMemo(() => new Map((filteredNodes || []).map((n) => [n.id, n])), [filteredNodes]);
+  const byId = useMemo(() => new Map((nodes || []).map((n) => [n.id, n])), [nodes]);
 
   const drillRootId = drillStack.length > 0 ? drillStack[drillStack.length - 1] : null;
   const drillRoot = drillRootId ? byId.get(drillRootId) : null;
@@ -71,12 +65,12 @@ export default function GenreExplorer({
   }, [open]);
 
   const basePool = useMemo(() => {
-    if (!filteredNodes?.length) return [];
-    if (!drillRoot) return filteredNodes;
+    if (!nodes?.length) return [];
+    if (!drillRoot) return nodes;
     const childIds = drillRoot.children || [];
     const childNodes = childIds.map((id) => byId.get(id)).filter(Boolean);
     return childNodes.length > 0 ? [drillRoot, ...childNodes] : [drillRoot];
-  }, [filteredNodes, drillRoot, byId]);
+  }, [nodes, drillRoot, byId]);
 
   const searchMatches = useMemo(() => {
     if (!searchQuery) return null;
@@ -97,16 +91,16 @@ export default function GenreExplorer({
   const activeSubset = useMemo(() => {
     if (searchMatches) return searchMatches;
     if (drillRoot) return basePool;
-    return filteredNodes || [];
-  }, [searchMatches, drillRoot, basePool, filteredNodes]);
+    return nodes || [];
+  }, [searchMatches, drillRoot, basePool, nodes]);
 
   const displayNodes = useMemo(() => {
-    if (!filteredNodes?.length || !bounds) return filteredNodes || [];
-    if (!searchMatches && !drillRoot) return filteredNodes;
+    if (!nodes?.length || !bounds) return nodes || [];
+    if (!searchMatches && !drillRoot) return nodes;
     if (activeSubset.length === 0) return [];
     const local = computeLocalBounds(activeSubset, bounds);
     return normalizeNodesInBounds(activeSubset, bounds, local);
-  }, [filteredNodes, bounds, searchMatches, drillRoot, activeSubset]);
+  }, [nodes, bounds, searchMatches, drillRoot, activeSubset]);
 
   const displayBounds = useMemo(() => {
     if (!bounds) return bounds;
@@ -201,7 +195,7 @@ export default function GenreExplorer({
           <CountryPicker compact value={selectedCountry} onChange={onCountryChange} />
           {selectedCountry && (
             <p className="mt-1 text-[10px] text-zinc-500">
-              {countryLabel(selectedCountry)} 장르 위주 · 추천도 같은 국가로 필터
+              {countryLabel(selectedCountry)} 곡 위주 추천 · 맵은 모든 장르 선택 가능
             </p>
           )}
         </div>
@@ -240,7 +234,7 @@ export default function GenreExplorer({
 
         <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[1fr_280px]">
           <div className="relative min-h-0 min-w-0 border-b border-zinc-900/10 lg:border-b-0 lg:border-r dark:border-white/5">
-            {!filteredNodes?.length ? (
+            {!nodes?.length ? (
               <div className="flex items-center justify-center text-sm text-zinc-500" style={{ height: mapHeight }}>
                 장르 맵 로딩 중...
               </div>

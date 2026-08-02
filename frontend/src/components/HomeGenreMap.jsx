@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import EveryNoiseMap, { computeLocalBounds, normalizeNodesInBounds } from "./EveryNoiseMap.jsx";
 import CountryPicker from "./CountryPicker.jsx";
-import { countryLabel, genreMatchesCountry } from "../utils/countries.js";
+import { countryLabel, sortNodesForCountryPreview } from "../utils/countries.js";
 
 function scoreMatch(node, query) {
   const name = node.name.toLowerCase();
@@ -38,25 +38,14 @@ export default function HomeGenreMap({
   const selection = selectedGenres || [];
   const searchQuery = genreSearch.trim().toLowerCase();
 
-  const countryFilteredNodes = useMemo(() => {
-    if (!nodes?.length || !selectedCountry) return nodes;
-    const matched = nodes.filter((n) => genreMatchesCountry(n.name, selectedCountry));
-    return matched.length > 0 ? matched : nodes;
-  }, [nodes, selectedCountry]);
-
-  const previewNodes = useMemo(() => {
-    if (!countryFilteredNodes?.length) return [];
-    if (selectedCountry) {
-      return [...countryFilteredNodes]
-        .sort((a, b) => (b.fontSize || 0) - (a.fontSize || 0))
-        .slice(0, 80);
-    }
-    return countryFilteredNodes.filter((n) => !n.parentId && (n.fontSize || 0) >= 118);
-  }, [countryFilteredNodes, selectedCountry]);
+  const previewNodes = useMemo(
+    () => sortNodesForCountryPreview(nodes, selectedCountry),
+    [nodes, selectedCountry],
+  );
 
   const searchMatches = useMemo(() => {
-    if (!searchQuery || !countryFilteredNodes?.length) return null;
-    return countryFilteredNodes
+    if (!searchQuery || !nodes?.length) return null;
+    return nodes
       .filter((n) => n.name.toLowerCase().includes(searchQuery))
       .map((n) => ({
         ...n,
@@ -68,7 +57,7 @@ export default function HomeGenreMap({
           (b.fontSize || 0) - (a.fontSize || 0) ||
           a.name.localeCompare(b.name),
       );
-  }, [searchQuery, countryFilteredNodes]);
+  }, [searchQuery, nodes]);
 
   const { displayNodes, displayBounds } = useMemo(() => {
     if (!nodes?.length) return { displayNodes: [], displayBounds: bounds };
@@ -94,7 +83,7 @@ export default function HomeGenreMap({
           <h3 className="font-display text-sm font-semibold text-zinc-900 dark:text-white">장르 맵</h3>
           <p className="mt-0.5 text-[11px] text-zinc-500">
             {selectedCountry
-              ? `${countryLabel(selectedCountry)} 장르 · 선택 장르 모두 포함 추천`
+              ? `${countryLabel(selectedCountry)} 곡 위주 추천 · 맵은 모든 장르 선택 가능`
               : "여러 장르를 고르면 모두 포함된 곡만 추천합니다"}
           </p>
         </div>
