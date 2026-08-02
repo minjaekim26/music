@@ -20,10 +20,10 @@ export default function GenreBars({ genres, title = "장르 유사도", onGenreC
               onClick={onGenreClick ? () => onGenreClick(g.name) : undefined}
               className={`w-full space-y-1 rounded-xl p-2 text-left transition ${
                 onGenreClick ? "hover:bg-white/5" : ""
-              } ${active ? "bg-accent/15 ring-1 ring-accent/40" : ""}`}
+              } ${active ? "bg-accent/20 ring-2 ring-accent/35 shadow-sm shadow-accent/15" : ""}`}
             >
               <div className="flex items-center justify-between text-xs">
-                <span className={`font-medium ${active ? "text-accent" : "text-zinc-200"}`}>
+                <span className={`font-medium ${active ? "text-violet-200" : "text-zinc-200"}`}>
                   {g.name}
                 </span>
                 <span className="tabular-nums text-zinc-400">{g.similarity}%</span>
