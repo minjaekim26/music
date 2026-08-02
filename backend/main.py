@@ -27,6 +27,7 @@ from music_api import (
 )
 from genre_map import find_genre_for_chat, get_genre_map_context
 from taste_analysis import analyze_taste_query, is_llm_configured, profile_to_keywords
+import llm_config
 import track_cache
 import openai_service
 
@@ -87,6 +88,8 @@ async def health():
         "ytmusic_authenticated": ytmusic_authenticated(),
         "youtube_api_configured": youtube_api_configured(),
         "llm_configured": is_llm_configured(),
+        "llm_provider": llm_config.provider_label() if is_llm_configured() else None,
+        "llm_model": llm_config.chat_model() if is_llm_configured() else None,
         "openai_configured": openai_service.is_configured(),
     }
 
@@ -251,7 +254,7 @@ async def chat(request: Request, body: ChatBody):
     """AI DJ — 모호한 상황·키워드 → taste 분석 → 실시간 곡 큐레이션 + 응답."""
     client: httpx.AsyncClient = request.app.state.http_client
     if not openai_service.is_configured():
-        raise HTTPException(status_code=503, detail="OpenAI API 키가 설정되지 않았습니다.")
+        raise HTTPException(status_code=503, detail="AI API 키가 설정되지 않았습니다.")
 
     msgs = [m.model_dump() for m in body.messages]
     user_texts = [m["content"] for m in msgs if m.get("role") == "user" and m.get("content")]

@@ -1,4 +1,4 @@
-"""OpenAI embeddings + chat. Key 없거나 실패해도 서버는 계속 동작."""
+"""LLM chat + OpenAI embeddings. Key 없거나 실패해도 서버는 계속 동작."""
 
 from __future__ import annotations
 
@@ -8,39 +8,33 @@ from typing import Any
 
 import httpx
 
+import llm_config
+
 logger = logging.getLogger(__name__)
 
-_OPENAI_BASE = "https://api.openai.com/v1"
 _EMBED_MODEL = "text-embedding-3-small"
-_CHAT_MODEL = "gpt-4o-mini"
 _MAX_REASON_TRACKS = 5
+_OPENAI_EMBED_BASE = "https://api.openai.com/v1"
 
 
 def _api_key() -> str:
-    return os.getenv("OPENAI_API_KEY", "").strip()
+    return llm_config.api_key()
 
 
 def is_configured() -> bool:
-    return bool(_api_key())
+    return llm_config.is_configured()
 
 
 def _base_url() -> str:
-    return os.getenv("OPENAI_BASE_URL", _OPENAI_BASE).rstrip("/")
+    return llm_config.base_url()
 
 
 def _headers() -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {_api_key()}",
-        "Content-Type": "application/json",
-    }
+    return llm_config.headers()
 
 
 def _chat_model() -> str:
-    return (
-        os.getenv("OPENAI_CHAT_MODEL", "").strip()
-        or os.getenv("OPENAI_MODEL", "").strip()
-        or _CHAT_MODEL
-    )
+    return llm_config.chat_model()
 
 
 def _openai_error_detail(resp: httpx.Response) -> str:
@@ -51,23 +45,36 @@ def _openai_error_detail(resp: httpx.Response) -> str:
     except Exception:
         msg, code = resp.text[:200], ""
     low = msg.lower()
+    provider = llm_config.provider_label()
     if resp.status_code == 429 or "quota" in code or "quota" in low or "insufficient_quota" in code:
-        return "OpenAI 사용 한도가 초과됐어요. platform.openai.com에서 결제·플랜을 확인하거나 잠시 후 다시 시도해 주세요."
+        if provider == "gemini":
+            return "Gemini 무료 한도에 도달했어요. 내일 다시 시도하거나 Google AI Studio에서 한도를 확인해 주세요."
+        if provider == "groq":
+            return "Groq 무료 한도에 도달했어요. 잠시 후 다시 시도해 주세요."
+        return "AI API 사용 한도가 초과됐어요. 잠시 후 다시 시도하거나 플랜·결제를 확인해 주세요."
     if resp.status_code == 401:
-        return "OpenAI API 키가 올바르지 않습니다."
+        return "AI API 키가 올바르지 않습니다. Render 환경 변수를 확인해 주세요."
     if resp.status_code == 404 or "model" in low:
-        return f"OpenAI 모델 설정 오류입니다. ({msg[:120]})"
-    return f"OpenAI 응답 오류 ({resp.status_code})"
+        return f"AI 모델 설정 오류입니다. ({msg[:120]})"
+    return f"AI 응답 오류 ({resp.status_code})"
 
 
 async def create_embedding(client: httpx.AsyncClient, text: str) -> list[float] | None:
-    if not is_configured() or not text.strip():
+    # ponytail: embeddings는 OpenAI 전용; Gemini/Groq 키면 None (유사도 검색만 규칙 기반)
+    embed_key = os.getenv("OPENAI_EMBED_API_KEY", "").strip() or (
+        _api_key() if llm_config.provider_label() == "openai" else ""
+    )
+    if not embed_key or not text.strip():
         return None
     model = os.getenv("OPENAI_EMBED_MODEL", _EMBED_MODEL)
+    embed_base = os.getenv("OPENAI_EMBED_BASE_URL", _OPENAI_EMBED_BASE).rstrip("/")
     try:
         resp = await client.post(
-            f"{_base_url()}/embeddings",
-            headers=_headers(),
+            f"{embed_base}/embeddings",
+            headers={
+                "Authorization": f"Bearer {embed_key}",
+                "Content-Type": "application/json",
+            },
             json={"model": model, "input": text[:8192]},
             timeout=20.0,
         )
@@ -134,7 +141,7 @@ async def chat_completion(
 ) -> tuple[str, str]:
     """Return (assistant_text, model_name). Raises on missing key; empty string if API error."""
     if not is_configured():
-        raise ValueError("OpenAI API 키가 설정되지 않았습니다.")
+        raise ValueError("AI API 키가 설정되지 않았습니다.")
 
     model = _chat_model()
     system = {
@@ -174,7 +181,7 @@ async def chat_completion(
         raise RuntimeError(detail)
     content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
     if not content:
-        raise RuntimeError("OpenAI가 빈 응답을 반환했습니다.")
+        raise RuntimeError("AI가 빈 응답을 반환했습니다.")
     return content, model
 
 
@@ -241,7 +248,7 @@ async def chat_taste_counseling(
 ) -> tuple[str, str]:
     """AI DJ — 큐레이션 컨텍스트 + 대화 히스토리로 응답 생성."""
     if not is_configured():
-        raise ValueError("OpenAI API 키가 설정되지 않았습니다.")
+        raise ValueError("AI API 키가 설정되지 않았습니다.")
 
     model = _chat_model()
     context = _build_curation_context(profile, tracks, keywords)
@@ -322,7 +329,7 @@ async def chat_genre_explanation(
     tracks: list[dict],
 ) -> tuple[str, str]:
     if not is_configured():
-        raise ValueError("OpenAI API 키가 설정되지 않았습니다.")
+        raise ValueError("AI API 키가 설정되지 않았습니다.")
 
     model = _chat_model()
     context = _build_genre_context(genre, tracks)

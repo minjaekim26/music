@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from typing import Any
 
 import httpx
+
+import llm_config
 
 _VALID_TEMPOS = frozenset({"slow", "mid", "fast"})
 
@@ -50,7 +51,7 @@ Rules:
 
 
 def is_llm_configured() -> bool:
-    return bool(os.getenv("OPENAI_API_KEY", "").strip())
+    return llm_config.is_configured()
 
 
 def _normalize_tempo(value: Any) -> str | None:
@@ -175,13 +176,10 @@ def analyze_taste_rules(query: str) -> dict[str, Any]:
 
 
 async def analyze_taste_llm(client: httpx.AsyncClient, query: str) -> dict[str, Any]:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY not configured")
+    if not is_llm_configured():
+        raise ValueError("LLM API key not configured")
 
-    base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-
+    model = llm_config.chat_model()
     payload = {
         "model": model,
         "messages": [
@@ -193,14 +191,20 @@ async def analyze_taste_llm(client: httpx.AsyncClient, query: str) -> dict[str, 
     }
 
     resp = await client.post(
-        f"{base_url}/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        f"{llm_config.base_url()}/chat/completions",
+        headers=llm_config.headers(),
         json=payload,
         timeout=45.0,
     )
+    if resp.status_code >= 400:
+        # 일부 OpenAI 호환 API는 json_object 미지원 → 한 번 더 시도
+        payload.pop("response_format", None)
+        resp = await client.post(
+            f"{llm_config.base_url()}/chat/completions",
+            headers=llm_config.headers(),
+            json=payload,
+            timeout=45.0,
+        )
     resp.raise_for_status()
     body = resp.json()
     content = body["choices"][0]["message"]["content"]
