@@ -1945,26 +1945,26 @@ def _norm_genre_label(text: str) -> str:
 
 
 def _genre_in_tags_strict(genre: str, tags: list[str]) -> bool:
-    """Exact/alias genre match only — no loose substring (pop ≠ k-pop)."""
+    """Exact/near-exact genre match only — no short aliases (dance ≠ dance pop)."""
     gn = _norm_genre_label(genre)
     if not gn:
         return False
-    g_compact = gn.replace(" ", "")
 
     from genre_map import _match_genre_id
 
+    variants = {gn, gn.replace(" ", ""), gn.replace(" ", "-")}
     gid = _match_genre_id(genre)
+    if gid:
+        gnn = _norm_genre_label(gid)
+        variants.update({gnn, gnn.replace(" ", ""), gnn.replace(" ", "-")})
 
     for tag in tags:
         tn = _norm_genre_label(tag)
         if not tn:
             continue
-        if gn == tn or g_compact == tn.replace(" ", ""):
+        candidates = {tn, tn.replace(" ", ""), tn.replace(" ", "-")}
+        if candidates & variants:
             return True
-        if gid:
-            tid = _match_genre_id(tag)
-            if tid and tid == gid:
-                return True
     return False
 
 
