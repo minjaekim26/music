@@ -176,6 +176,11 @@ export default function ChatPage() {
     setDraft("");
     const userMsg = { role: "user", content };
     const apiMessages = [...messages, userMsg].map(({ role, content: c }) => ({ role, content: c }));
+    const excludeTracks = messages.flatMap((m) =>
+      m.role === "assistant" && m.tracks?.length
+        ? m.tracks.map((t) => ({ title: t.title || "", artist: t.artist || "" }))
+        : [],
+    );
     setMessages((prev) => [...prev, userMsg]);
     bumpNote();
     setLoading(true);
@@ -184,7 +189,7 @@ export default function ChatPage() {
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages }),
+        body: JSON.stringify({ messages: apiMessages, exclude_tracks: excludeTracks }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -201,6 +206,7 @@ export default function ChatPage() {
           tracks: data.tracks || [],
           tasteProfile: data.taste_profile,
           keywords: data.keywords_used,
+          searchKeywords: data.search_keywords,
           country: data.country,
           matchedGenres: data.matched_genres,
         },

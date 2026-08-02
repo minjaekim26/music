@@ -130,6 +130,10 @@ def _normalize_key(title: str, artist: str) -> str:
     return f"{title.strip().lower()}|{artist.strip().lower()}"
 
 
+def track_dedupe_key(title: str, artist: str) -> str:
+    return _normalize_key(title or "", artist or "")
+
+
 def _simplify(text: str) -> str:
     return "".join(ch.lower() for ch in text if ch.isalnum() or ch.isspace()).strip()
 
@@ -2505,6 +2509,8 @@ async def recommend_by_keywords(
     *,
     limit: int = 12,
     country: str | None = None,
+    search_keywords: list[str] | None = None,
+    exclude_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     cleaned = list(dict.fromkeys(k.strip() for k in keywords if (k or "").strip()))[:12]
     if not cleaned:
@@ -2515,10 +2521,16 @@ async def recommend_by_keywords(
     base_profile = build_genre_profile(cleaned, weights)
     base_tags = cleaned
 
-    candidates = await _collect_keyword_candidates(client, cleaned, per_keyword=10)
+    fetch_kws = list(dict.fromkeys(search_keywords or cleaned))[:5]
+    candidates = await _collect_keyword_candidates(client, fetch_kws, per_keyword=10)
+    primary_kw = (fetch_kws[0] if fetch_kws else cleaned[0]).lower()
 
     scored: list[tuple[dict, float, int]] = []
     for track in candidates:
+        key = _normalize_key(track.get("title", ""), track.get("artist", ""))
+        if exclude_keys and key in exclude_keys:
+            continue
+
         track_tags: list[str] = list(cleaned)
         sk = track.get("source_keyword")
         if sk:
@@ -2535,6 +2547,12 @@ async def recommend_by_keywords(
         hit_ratio = (hit_count / len(cleaned)) * 100 if cleaned else 0
         combined = round(min(100.0, genre_sim * 0.55 + hit_ratio * 0.45), 1)
 
+        sk_low = (sk or "").lower()
+        if sk_low == primary_kw:
+            combined = min(100.0, combined + 18.0)
+        elif primary_kw and primary_kw in sk_low:
+            combined = min(100.0, combined + 10.0)
+
         if combined < meta["min_match"]:
             continue
 
@@ -2543,6 +2561,9 @@ async def recommend_by_keywords(
     # 필터가 너무 빡세면 상위 후보라도 반환 (빈 결과 방지)
     if not scored and candidates:
         for track in candidates:
+            key = _normalize_key(track.get("title", ""), track.get("artist", ""))
+            if exclude_keys and key in exclude_keys:
+                continue
             track_tags = list(cleaned)
             sk = track.get("source_keyword")
             if sk:

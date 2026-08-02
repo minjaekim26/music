@@ -111,6 +111,13 @@ def _clean_str_list(values: Any, *, limit: int = 8) -> list[str]:
     return out
 
 
+_GENERIC_COUNTRY_TAGS = frozenset({
+    "korean", "korea", "k-pop", "kpop", "k pop",
+    "japanese", "japan", "j-pop", "jpop",
+    "american", "british", "english", "latin",
+})
+
+
 def enrich_keywords_with_country(
     keywords: list[str],
     country_id: str | None,
@@ -123,17 +130,55 @@ def enrich_keywords_with_country(
         return keywords
 
     primary = cfg["genre_hints"][0] if cfg.get("genre_hints") else cfg["tags"][0]
-    compounds = [f"{primary} {g}".strip() for g in genres[:3]]
+    compounds = [f"{primary} {g}".strip() for g in genres[:3] if g]
     hints = list((cfg.get("genre_hints") or [])[:2])
+
+    # LLM/사용자 키워드 우선 → 복합어 추가 → 범용 k-pop 등은 맨 뒤
+    ordered: list[str] = list(keywords)
+    for c in compounds:
+        if c.lower() not in {x.lower() for x in ordered}:
+            ordered.insert(0, c)
+    for h in hints:
+        if h.lower() not in {x.lower() for x in ordered}:
+            ordered.append(h)
 
     out: list[str] = []
     seen: set[str] = set()
-    for item in compounds + hints + keywords:
+    for item in ordered:
         k = str(item).strip().lower()
         if k and k not in seen:
             seen.add(k)
             out.append(k)
     return out[:12]
+
+
+def pick_search_keywords(keywords: list[str]) -> list[str]:
+    """Last.fm/Deezer 검색용 — 구체적 구문 우선, k-pop 같은 범용 태그는 후순위."""
+    if not keywords:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+
+    for k in keywords:
+        ks = str(k).strip().lower()
+        if ks and " " in ks and ks not in seen:
+            seen.add(ks)
+            out.append(ks)
+
+    for k in keywords:
+        ks = str(k).strip().lower()
+        if ks and ks not in seen and ks not in _GENERIC_COUNTRY_TAGS:
+            seen.add(ks)
+            out.append(ks)
+
+    if len(out) < 2:
+        for k in keywords:
+            ks = str(k).strip().lower()
+            if ks and ks not in seen:
+                seen.add(ks)
+                out.append(ks)
+
+    return out[:5]
 
 
 def profile_to_keywords(profile: dict[str, Any]) -> list[str]:
@@ -353,8 +398,8 @@ async def analyze_chat_intent(
         except Exception as exc:
             logger.warning("analyze_chat_intent LLM failed, using rules: %s", exc)
 
-    combined = f"{convo}\n{last_query}" if len(user_texts) > 1 else last_query
-    return analyze_taste_rules(combined)
+    # ponytail: rules는 마지막 User 발화만 — 이전 턴 키워드가 섞이면 같은 곡만 반복
+    return analyze_taste_rules(last_query)
 
 
 async def analyze_taste_llm(client: httpx.AsyncClient, query: str) -> dict[str, Any]:
@@ -393,8 +438,10 @@ async def analyze_taste_query(client: httpx.AsyncClient, query: str) -> dict[str
 
 if __name__ == "__main__":
     assert infer_country_from_query("한국 트랩 골라줘") == "kr"
-    kr_kw = enrich_keywords_with_country(["trap"], "kr", ["trap"])
-    assert kr_kw[0].startswith("korean")
+    kr_kw = enrich_keywords_with_country(["trap", "korean hip hop"], "kr", ["trap"])
+    assert kr_kw[0] == "korean trap"
+    assert pick_search_keywords(kr_kw)[0] == "korean trap"
+    assert "k-pop" not in pick_search_keywords(kr_kw)[:3]
     convo = _format_conversation([
         {"role": "user", "content": "한국 트랩 골라줘"},
         {"role": "assistant", "content": "골랐어요."},
