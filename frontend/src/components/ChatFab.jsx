@@ -6,7 +6,7 @@ export default function ChatFab() {
     <button
       type="button"
       onClick={goChat}
-      aria-label="취향상담소 열기"
+      aria-label="AI DJ 열기"
       className="fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-accent text-white shadow-lg shadow-accent/35 ring-4 ring-accent/15 transition hover:scale-105 hover:shadow-xl hover:shadow-accent/40 active:scale-95 md:bottom-6 md:right-6"
     >
       <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">

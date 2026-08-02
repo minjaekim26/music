@@ -168,7 +168,7 @@ export default function ChatPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.detail || "상담 요청에 실패했습니다.");
+        throw new Error(data.detail || "AI DJ 요청에 실패했습니다.");
       }
       setModel(data.model || "");
       setMessages((prev) => [
@@ -212,8 +212,8 @@ export default function ChatPage() {
         <div className="flex items-center gap-2 border-b border-zinc-200 p-3 dark:border-white/10">
           <img src="/logo.png" alt="" className="h-7 w-7 rounded-full object-contain" />
           <div>
-            <span className="font-display text-sm font-bold">취향상담소</span>
-            <p className="text-[10px] text-zinc-500">distribution AI</p>
+            <span className="font-display text-sm font-bold">AI DJ</span>
+            <p className="text-[10px] text-zinc-500">distribution</p>
           </div>
         </div>
 
@@ -224,13 +224,13 @@ export default function ChatPage() {
             className="flex w-full items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2.5 text-sm text-zinc-700 transition hover:bg-white dark:border-white/10 dark:text-zinc-200 dark:hover:bg-white/5"
           >
             <span className="text-lg leading-none">+</span>
-            새 상담
+            새 대화
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-2 pb-2">
           <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
-            이번 상담
+            이번 대화
           </p>
           <p className="truncate px-3 py-2 text-sm text-zinc-500 dark:text-zinc-400">
             {messages.find((m) => m.role === "user")?.content?.slice(0, 48) || "상황이나 기분을 말해 주세요"}
@@ -275,9 +275,9 @@ export default function ChatPage() {
             >
               ← distribution
             </button>
-            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">취향상담소</span>
+            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">AI DJ</span>
             <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent">
-              취향 · 장르 · 바로가기
+              큐레이션 · 장르 · 바로가기
             </span>
           </div>
         </header>

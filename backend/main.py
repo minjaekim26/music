@@ -248,7 +248,7 @@ async def taste_analyze(request: Request, body: TasteAnalyzeBody):
 
 @app.post("/api/chat")
 async def chat(request: Request, body: ChatBody):
-    """취향상담소 — 모호한 상황·키워드 → taste 분석 → 실시간 곡 큐레이션 + 상담 응답."""
+    """AI DJ — 모호한 상황·키워드 → taste 분석 → 실시간 곡 큐레이션 + 응답."""
     client: httpx.AsyncClient = request.app.state.http_client
     if not openai_service.is_configured():
         raise HTTPException(status_code=503, detail="OpenAI API 키가 설정되지 않았습니다.")

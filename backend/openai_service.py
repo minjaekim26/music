@@ -156,7 +156,7 @@ async def chat_completion(
     return content, model
 
 
-_COUNSELOR_SYSTEM = """당신은 distribution 음악 앱의 「취향상담소」 상담사입니다.
+_COUNSELOR_SYSTEM = """당신은 distribution 음악 앱의 「AI DJ」입니다.
 
 역할:
 - 사용자의 모호한 상황·감정·키워드를 듣고 공감한다.
@@ -199,7 +199,7 @@ async def chat_taste_counseling(
     tracks: list[dict],
     keywords: list[str],
 ) -> tuple[str, str]:
-    """취향상담소 — 큐레이션 컨텍스트 + 대화 히스토리로 상담 응답 생성."""
+    """AI DJ — 큐레이션 컨텍스트 + 대화 히스토리로 응답 생성."""
     if not is_configured():
         raise ValueError("OpenAI API 키가 설정되지 않았습니다.")
 
