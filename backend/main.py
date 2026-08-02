@@ -27,7 +27,7 @@ from music_api import (
 )
 from country_filter import infer_country_from_query
 from genre_map import find_genre_for_chat, get_genre_map_context
-from taste_analysis import analyze_taste_query, is_llm_configured, profile_to_keywords
+from taste_analysis import analyze_chat_intent, analyze_taste_query, is_llm_configured, profile_to_keywords
 import llm_config
 import track_cache
 import openai_service
@@ -262,7 +262,6 @@ async def chat(request: Request, body: ChatBody):
     if not user_texts:
         raise HTTPException(status_code=400, detail="사용자 메시지가 필요합니다.")
 
-    counsel_query = user_texts[-1] if len(user_texts) == 1 else " / ".join(user_texts[-3:])
     last_query = user_texts[-1]
 
     def _slim_track(t: dict) -> dict:
@@ -278,12 +277,12 @@ async def chat(request: Request, body: ChatBody):
         }
 
     try:
-        chat_country = infer_country_from_query(counsel_query) or infer_country_from_query(last_query)
+        chat_country = infer_country_from_query(last_query)
 
         genre_id = find_genre_for_chat(last_query)
         if genre_id:
             genre_ctx = get_genre_map_context(genre_id)
-            profile_pre = await analyze_taste_query(client, counsel_query)
+            profile_pre = await analyze_chat_intent(client, msgs)
             country = profile_pre.get("country") or chat_country
             rec = await recommend_by_genre(
                 client,
@@ -311,7 +310,7 @@ async def chat(request: Request, body: ChatBody):
                 "tracks": [_slim_track(t) for t in tracks[:8]],
             }
 
-        profile = await analyze_taste_query(client, counsel_query)
+        profile = await analyze_chat_intent(client, msgs)
         country = profile.get("country") or chat_country
         if country and not profile.get("country"):
             profile = {**profile, "country": country}

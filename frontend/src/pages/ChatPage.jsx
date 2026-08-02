@@ -362,7 +362,14 @@ export default function ChatPage() {
                             <GenreBriefCard genre={msg.genre} onAsk={sendMessage} />
                           )}
                           {msg.mode !== "genre" && (
-                            <TasteChips profile={msg.tasteProfile} keywords={msg.keywords} country={msg.country} />
+                            <>
+                              <TasteChips profile={msg.tasteProfile} keywords={msg.keywords} country={msg.country} />
+                              {msg.tasteProfile?.intent_summary && (
+                                <p className="mt-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                                  이해: {msg.tasteProfile.intent_summary}
+                                </p>
+                              )}
+                            </>
                           )}
                           {msg.tracks?.length > 0 && (
                             <div className="mt-3 space-y-1.5">

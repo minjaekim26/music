@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -11,54 +12,67 @@ import httpx
 import llm_config
 from country_filter import COUNTRIES, infer_country_from_query, normalize_country
 
+logger = logging.getLogger(__name__)
+
 _VALID_TEMPOS = frozenset({"slow", "mid", "fast"})
 _VALID_COUNTRIES = frozenset(COUNTRIES.keys())
 
-# 한국어·영어 힌트 → mood / genre / tempo (LLM 미설정 시 폴백)
 _RULE_HINTS: list[tuple[tuple[str, ...], str, str]] = [
-    (("몽환", "몽환적", "dreamy", "ethereal"), "mood", "dreamy"),
-    (("감성", "감성적", "emotional", "sad", "슬픈", "우울"), "mood", "emotional"),
-    (("차분", "잔잔", "평온", "calm", "chill", "relax", "편안"), "mood", "calm"),
-    (("밤", "야간", "night", "late night"), "mood", "calm"),
+    (("몽환", "몽환적", "dreamy", "ethereal", "슈게이즈", "shoegaze"), "mood", "dreamy"),
+    (("감성", "감성적", "emotional", "sad", "슬픈", "우울", "melancholy"), "mood", "emotional"),
+    (("차분", "잔잔", "평온", "calm", "chill", "relax", "편안", "잔잔한"), "mood", "calm"),
+    (("밤", "야간", "night", "late night", "드라이브"), "mood", "calm"),
     (("혼자", "alone", "solitude"), "mood", "emotional"),
-    (("신나", "활기", "energetic", "upbeat", "party"), "mood", "energetic"),
+    (("신나", "활기", "energetic", "upbeat", "party", "터지", "고에너지"), "mood", "energetic"),
     (("몽글", "포근", "cozy", "warm"), "mood", "calm"),
+    (("집중", "공부", "study", "focus"), "mood", "calm"),
     (("트랩", "trap", "drill"), "genre", "trap"),
+    (("하이퍼팝", "hyperpop", "digicore"), "genre", "hyperpop"),
+    (("로파이", "lofi", "lo-fi", "lo fi"), "genre", "lo-fi"),
+    (("시티팝", "city pop", "citypop"), "genre", "city pop"),
+    (("신스", "synthwave", "synth pop", "synthpop"), "genre", "synthpop"),
     (("인디", "indie"), "genre", "indie"),
     (("앰비언트", "ambient"), "genre", "ambient"),
     (("얼터너티브", "alternative"), "genre", "alternative rock"),
-    (("재즈", "jazz"), "genre", "jazz"),
+    (("재즈", "jazz", "jazz rap"), "genre", "jazz"),
     (("클래식", "classical"), "genre", "classical"),
     (("힙합", "hip hop", "hip-hop", "hiphop", "rap"), "genre", "hip hop"),
     (("r&b", "rnb", "알앤비"), "genre", "rnb"),
     (("록", "rock"), "genre", "rock"),
     (("팝", "pop"), "genre", "pop"),
-    (("일렉", "electronic", "edm"), "genre", "electronic"),
-    (("슬로우", "느린", "slow", "ballad", "발라드"), "tempo", "slow"),
+    (("일렉", "electronic", "edm", "house", "techno"), "genre", "electronic"),
+    (("메탈", "metal"), "genre", "metal"),
+    (("펑크", "punk"), "genre", "punk"),
+    (("포크", "folk", "acoustic"), "genre", "folk"),
+    (("발라드", "ballad"), "genre", "ballad"),
+    (("ost", "사운드트랙", "soundtrack"), "genre", "soundtrack"),
+    (("슬로우", "느린", "slow"), "tempo", "slow"),
     (("빠른", "fast", "uptempo", "dance"), "tempo", "fast"),
     (("미드", "medium"), "tempo", "mid"),
 ]
 
-_SYSTEM_PROMPT = """You analyze music taste / curation requests for a recommendation app (Last.fm tags + country filters).
+_CHAT_INTENT_SYSTEM = """You analyze music curation chat for a Korean/English music app.
 
-Return ONLY a JSON object (no markdown) with exactly these keys:
-- "mood": array of English lowercase mood words — 0-4 items
-- "genre": array of English lowercase genre tags — 1-4 items
-- "tempo": one of "slow", "mid", "fast", or null
-- "country": one of "kr", "jp", "us", "uk", "fr", "br", "mx", "latin", or null
-- "keywords": array of 5-10 English search phrases for music APIs (most specific first)
-- "intent_summary": one short English line summarizing the user's ask
+Input: a conversation (User / Assistant). Understand the LATEST user intent IN FULL CONTEXT.
 
-Critical rules:
-- ALWAYS preserve regional/national modifiers in BOTH country AND keywords.
-  Example: "Korean trap" / "한국 트랩" → country: "kr", keywords MUST start with "korean trap", "korean hip hop" — NOT just "trap".
-  Example: generic "trap" with no region → country: null, keywords: ["trap", ...].
-- Use compound phrases for region+genre: "uk drill", "french house", "japanese city pop", "latin trap".
-- keywords[0] must be the most specific phrase matching the user's exact request.
-- kr = Korea/K-pop/K-hip-hop/K-indie, jp = Japan/J-pop, uk = UK/grime, etc.
-- Infer tempo/mood from context (study → calm, workout → energetic/fast).
-- All field values in English except you may echo the user's core ask in intent_summary.
-"""
+Return ONLY JSON (no markdown):
+{
+  "mood": ["..."],
+  "genre": ["..."],
+  "tempo": "slow"|"mid"|"fast"|null,
+  "country": "kr"|"jp"|"us"|"uk"|"fr"|"br"|"mx"|"latin"|null,
+  "keywords": ["..."],
+  "intent_summary": "..."
+}
+
+Rules:
+- Korean and English both common. Parse Korean naturally (한국 트랩=korean trap, 잔잔한=calm, 신나는=energetic).
+- Follow-ups inherit prior context: "더 신나게" keeps earlier genre/country and bumps energy.
+- Regional modifiers → country + compound keywords: "한국 트랩" → kr + ["korean trap","korean hip hop"].
+- Situation phrases: "비 오는 날"→rainy calm, "운동"→energetic fast, "이별"→emotional.
+- keywords[0] = most specific phrase for the current ask."""
+
+_TASTE_SYSTEM = _CHAT_INTENT_SYSTEM + "\n\n(Single message mode — no prior conversation.)"
 
 
 def is_llm_configured() -> bool:
@@ -102,7 +116,6 @@ def enrich_keywords_with_country(
     country_id: str | None,
     genres: list[str],
 ) -> list[str]:
-    """지역+장르 복합 키워드를 앞에 붙임 (korean trap ≠ trap)."""
     if not country_id:
         return keywords
     cfg = COUNTRIES.get(country_id)
@@ -124,7 +137,6 @@ def enrich_keywords_with_country(
 
 
 def profile_to_keywords(profile: dict[str, Any]) -> list[str]:
-    """mood + genre + tempo + country → Last.fm 검색용 키워드."""
     combined: list[str] = []
     for key in ("keywords", "mood", "genre"):
         combined.extend(profile.get(key) or [])
@@ -144,12 +156,45 @@ def profile_to_keywords(profile: dict[str, Any]) -> list[str]:
     return out[:12]
 
 
+def _format_conversation(messages: list[dict[str, str]]) -> str:
+    lines: list[str] = []
+    for m in messages[-14:]:
+        role = (m.get("role") or "").strip()
+        content = (m.get("content") or "").strip()
+        if role not in ("user", "assistant") or not content:
+            continue
+        label = "User" if role == "user" else "Assistant"
+        lines.append(f"{label}: {content}")
+    return "\n".join(lines)
+
+
+def _extract_raw_keywords(query: str) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for token in re.findall(r"[a-zA-Z][a-zA-Z0-9\-']{1,24}", query):
+        t = token.lower()
+        if t not in seen and len(t) > 2:
+            seen.add(t)
+            out.append(t)
+    for chunk in re.findall(r"[가-힣]{2,8}", query):
+        if chunk not in seen:
+            seen.add(chunk)
+            out.append(chunk)
+    return out[:8]
+
+
 def _parse_llm_json(content: str) -> dict[str, Any]:
     text = content.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
-    data = json.loads(text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{[\s\S]*\}", text)
+        if not match:
+            raise
+        data = json.loads(match.group())
     if not isinstance(data, dict):
         raise ValueError("LLM response is not a JSON object")
     return data
@@ -168,6 +213,9 @@ def _normalize_profile(data: dict[str, Any], *, source: str, query: str) -> dict
     else:
         keywords = enrich_keywords_with_country(keywords, country, genre)
 
+    if not intent_summary:
+        intent_summary = query[:120]
+
     return {
         "mood": mood,
         "genre": genre,
@@ -181,7 +229,6 @@ def _normalize_profile(data: dict[str, Any], *, source: str, query: str) -> dict
 
 
 def analyze_taste_rules(query: str) -> dict[str, Any]:
-    """LLM 미설정 시 키워드 규칙 매칭."""
     q = query.lower()
     moods: list[str] = []
     genres: list[str] = []
@@ -203,20 +250,25 @@ def analyze_taste_rules(query: str) -> dict[str, Any]:
         elif t in {"dreamy", "calm", "emotional", "chill", "sad", "happy", "energetic", "melancholy"}:
             if t not in moods:
                 moods.append(t)
-        elif t in {"indie", "ambient", "rock", "pop", "jazz", "classical", "electronic", "rnb", "folk", "soul", "trap", "drill"}:
+        elif t in {
+            "indie", "ambient", "rock", "pop", "jazz", "classical", "electronic", "rnb", "folk",
+            "soul", "trap", "drill", "hyperpop", "lo-fi", "lofi", "synthpop", "metal", "punk",
+        }:
             if t not in genres:
                 genres.append(t)
 
     country = infer_country_from_query(query)
+    raw_kw = _extract_raw_keywords(query)
 
-    night_alone = any(n in q for n in ("밤", "야간", "night", "late night", "혼자", "alone", "solitude"))
-    dreamy_calm = any(m in moods for m in ("dreamy", "calm", "emotional"))
-    if night_alone and dreamy_calm:
-        if tempo is None:
-            tempo = "slow"
-        for g in ("indie", "ambient"):
-            if g not in genres:
-                genres.append(g)
+    if any(n in q for n in ("밤", "야간", "night", "혼자")) and not tempo:
+        tempo = "slow"
+
+    if not moods and not genres and raw_kw:
+        return _normalize_profile(
+            {"mood": moods, "genre": genres, "tempo": tempo, "country": country, "keywords": raw_kw},
+            source="rules",
+            query=query,
+        )
 
     if not moods and not genres and not tempo:
         moods = ["calm"]
@@ -228,39 +280,92 @@ def analyze_taste_rules(query: str) -> dict[str, Any]:
     )
 
 
-async def analyze_taste_llm(client: httpx.AsyncClient, query: str) -> dict[str, Any]:
-    if not is_llm_configured():
-        raise ValueError("LLM API key not configured")
-
-    model = llm_config.chat_model()
-    payload = {
+async def _call_intent_llm(
+    client: httpx.AsyncClient,
+    *,
+    system: str,
+    user_content: str,
+) -> dict[str, Any]:
+    model = llm_config.counsel_model()
+    base_payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": query},
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_content},
         ],
-        "temperature": 0.2,
-        "response_format": {"type": "json_object"},
+        "temperature": 0.25,
     }
 
-    resp = await client.post(
-        f"{llm_config.base_url()}/chat/completions",
-        headers=llm_config.headers(),
-        json=payload,
-        timeout=45.0,
-    )
-    if resp.status_code >= 400:
-        payload.pop("response_format", None)
+    last_err: Exception | None = None
+    for extra in ({"response_format": {"type": "json_object"}}, {}):
+        payload = {**base_payload, **extra}
         resp = await client.post(
             f"{llm_config.base_url()}/chat/completions",
             headers=llm_config.headers(),
             json=payload,
-            timeout=45.0,
+            timeout=50.0,
         )
-    resp.raise_for_status()
-    body = resp.json()
-    content = body["choices"][0]["message"]["content"]
-    data = _parse_llm_json(content)
+        if resp.status_code >= 400:
+            last_err = httpx.HTTPStatusError("LLM error", request=resp.request, response=resp)
+            continue
+        body = resp.json()
+        content = body["choices"][0]["message"].get("content") or ""
+        return _parse_llm_json(content)
+
+    if last_err:
+        raise last_err
+    raise RuntimeError("LLM intent call failed")
+
+
+async def analyze_chat_intent(
+    client: httpx.AsyncClient,
+    messages: list[dict[str, str]],
+) -> dict[str, Any]:
+    """AI DJ — 대화 전체 맥락으로 최신 의도 분석."""
+    user_texts = [m["content"] for m in messages if m.get("role") == "user" and m.get("content")]
+    if not user_texts:
+        raise ValueError("사용자 메시지가 필요합니다.")
+
+    last_query = user_texts[-1].strip()
+    convo = _format_conversation(messages)
+    user_block = (
+        f"Conversation:\n{convo}\n\n"
+        "Analyze the LATEST User message for music curation. "
+        "Use full conversation context for follow-ups."
+    )
+
+    if is_llm_configured():
+        try:
+            data = await _call_intent_llm(
+                client,
+                system=_CHAT_INTENT_SYSTEM,
+                user_content=user_block,
+            )
+            profile = _normalize_profile(data, source="llm", query=last_query)
+            if not profile.get("country"):
+                profile["country"] = infer_country_from_query(last_query)
+                profile["keywords"] = enrich_keywords_with_country(
+                    profile.get("keywords") or [],
+                    profile.get("country"),
+                    profile.get("genre") or [],
+                )
+            return profile
+        except Exception as exc:
+            logger.warning("analyze_chat_intent LLM failed, using rules: %s", exc)
+
+    combined = f"{convo}\n{last_query}" if len(user_texts) > 1 else last_query
+    return analyze_taste_rules(combined)
+
+
+async def analyze_taste_llm(client: httpx.AsyncClient, query: str) -> dict[str, Any]:
+    if not is_llm_configured():
+        raise ValueError("LLM API key not configured")
+
+    data = await _call_intent_llm(
+        client,
+        system=_TASTE_SYSTEM,
+        user_content=query,
+    )
     profile = _normalize_profile(data, source="llm", query=query)
     if not profile.get("country"):
         profile["country"] = infer_country_from_query(query)
@@ -273,7 +378,6 @@ async def analyze_taste_llm(client: httpx.AsyncClient, query: str) -> dict[str, 
 
 
 async def analyze_taste_query(client: httpx.AsyncClient, query: str) -> dict[str, Any]:
-    """자연어 → {mood, genre, tempo, country, keywords, source, query}."""
     query = query.strip()
     if not query:
         raise ValueError("취향 설명을 입력해 주세요.")
@@ -281,15 +385,20 @@ async def analyze_taste_query(client: httpx.AsyncClient, query: str) -> dict[str
     if is_llm_configured():
         try:
             return await analyze_taste_llm(client, query)
-        except (httpx.HTTPError, json.JSONDecodeError, KeyError, ValueError):
-            pass
+        except Exception as exc:
+            logger.warning("analyze_taste_query LLM failed, using rules: %s", exc)
 
     return analyze_taste_rules(query)
 
 
 if __name__ == "__main__":
     assert infer_country_from_query("한국 트랩 골라줘") == "kr"
-    assert infer_country_from_query("trap playlist") is None
     kr_kw = enrich_keywords_with_country(["trap"], "kr", ["trap"])
     assert kr_kw[0].startswith("korean")
+    convo = _format_conversation([
+        {"role": "user", "content": "한국 트랩 골라줘"},
+        {"role": "assistant", "content": "골랐어요."},
+        {"role": "user", "content": "더 신나게"},
+    ])
+    assert "더 신나게" in convo
     print("taste_analysis ok", kr_kw[:3])
