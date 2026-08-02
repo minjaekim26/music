@@ -247,22 +247,62 @@ async def taste_analyze(request: Request, body: TasteAnalyzeBody):
 
 @app.post("/api/chat")
 async def chat(request: Request, body: ChatBody):
-    """OpenAI 챗봇 — 대화 히스토리를 받아 assistant 응답 반환."""
+    """취향상담소 — 모호한 상황·키워드 → taste 분석 → 실시간 곡 큐레이션 + 상담 응답."""
     client: httpx.AsyncClient = request.app.state.http_client
     if not openai_service.is_configured():
         raise HTTPException(status_code=503, detail="OpenAI API 키가 설정되지 않았습니다.")
+
+    msgs = [m.model_dump() for m in body.messages]
+    user_texts = [m["content"] for m in msgs if m.get("role") == "user" and m.get("content")]
+    if not user_texts:
+        raise HTTPException(status_code=400, detail="사용자 메시지가 필요합니다.")
+
+    counsel_query = user_texts[-1] if len(user_texts) == 1 else " / ".join(user_texts[-3:])
+
     try:
-        reply, model = await openai_service.chat_completion(
+        profile = await analyze_taste_query(client, counsel_query)
+        keywords = profile_to_keywords(profile)
+        tracks: list[dict] = []
+        matched_genres: list[dict] = []
+        if keywords:
+            rec = await recommend_by_keywords(client, keywords, limit=8)
+            tracks = rec.get("tracks") or []
+            matched_genres = rec.get("matched_genres") or []
+
+        reply, model = await openai_service.chat_taste_counseling(
             client,
-            [m.model_dump() for m in body.messages],
+            msgs,
+            profile=profile,
+            tracks=tracks,
+            keywords=keywords,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"OpenAI 요청 실패: {exc}") from exc
-    return {"reply": reply, "model": model}
+        raise HTTPException(status_code=502, detail=f"음악 API 요청 실패: {exc}") from exc
+
+    def _slim_track(t: dict) -> dict:
+        return {
+            "title": t.get("title"),
+            "artist": t.get("artist"),
+            "cover": t.get("cover"),
+            "similarity": t.get("similarity"),
+            "genre_tags": (t.get("genre_tags") or [])[:4],
+            "spotify_id": t.get("spotify_id"),
+            "deezer_id": t.get("deezer_id"),
+            "mbid": t.get("mbid"),
+        }
+
+    return {
+        "reply": reply,
+        "model": model,
+        "taste_profile": profile,
+        "keywords_used": keywords,
+        "matched_genres": matched_genres[:6],
+        "tracks": [_slim_track(t) for t in tracks[:8]],
+    }
 
 
 @app.post("/api/analyze")

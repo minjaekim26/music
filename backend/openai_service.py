@@ -156,6 +156,97 @@ async def chat_completion(
     return content, model
 
 
+_COUNSELOR_SYSTEM = """당신은 distribution 음악 앱의 「취향상담소」 상담사입니다.
+
+역할:
+- 사용자의 모호한 상황·감정·키워드를 듣고 공감한다.
+- 시스템이 실시간으로 큐레이션한 곡·장르를 따뜻한 한국어로 소개한다.
+- 제공된 [큐레이션 결과]의 곡만 추천 근거로 사용한다 (목록에 없는 곡은 지어내지 않는다).
+- 곡을 번호 나열하지 말고, 분위기·상황과 연결된 큐레이션 이야기로 2~4문장 답한다.
+- 곡이 없으면 솔직히 말하고, 다른 표현·상황·장르 힌트를 부드럽게 요청한다.
+- 이전 대화 맥락을 유지하며 follow-up(더 신나게, 더 잔잔하게 등)에 대응한다."""
+
+
+def _build_curation_context(
+    profile: dict[str, Any],
+    tracks: list[dict],
+    keywords: list[str],
+) -> str:
+    lines = [
+        "[큐레이션 결과 — 답변에 반드시 반영]",
+        f"분석 mood: {', '.join(profile.get('mood') or []) or '—'}",
+        f"분석 genre: {', '.join(profile.get('genre') or []) or '—'}",
+        f"tempo: {profile.get('tempo') or '—'}",
+        f"검색 키워드: {', '.join(keywords) or '—'}",
+    ]
+    if tracks:
+        lines.append("추천 곡:")
+        for i, t in enumerate(tracks[:8], 1):
+            sim = t.get("similarity") or t.get("genre_similarity") or 0
+            tags = ", ".join((t.get("genre_tags") or [])[:3])
+            extra = f" [{tags}]" if tags else ""
+            lines.append(f"  {i}. {t.get('title', '')} — {t.get('artist', '')} (유사도 {sim}%){extra}")
+    else:
+        lines.append("추천 곡: (매칭 없음 — 표현을 바꿔 달라고 안내)")
+    return "\n".join(lines)
+
+
+async def chat_taste_counseling(
+    client: httpx.AsyncClient,
+    messages: list[dict[str, str]],
+    *,
+    profile: dict[str, Any],
+    tracks: list[dict],
+    keywords: list[str],
+) -> tuple[str, str]:
+    """취향상담소 — 큐레이션 컨텍스트 + 대화 히스토리로 상담 응답 생성."""
+    if not is_configured():
+        raise ValueError("OpenAI API 키가 설정되지 않았습니다.")
+
+    model = (
+        os.getenv("OPENAI_CHAT_MODEL", "").strip()
+        or os.getenv("OPENAI_MODEL", "").strip()
+        or _CHAT_MODEL
+    )
+    context = _build_curation_context(profile, tracks, keywords)
+    payload_messages: list[dict[str, str]] = [
+        {"role": "system", "content": f"{_COUNSELOR_SYSTEM}\n\n{context}"},
+    ]
+    for m in messages[-16:]:
+        role = (m.get("role") or "").strip()
+        content = (m.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            payload_messages.append({"role": role, "content": content[:4000]})
+
+    if len(payload_messages) < 2:
+        raise ValueError("메시지가 비어 있습니다.")
+
+    resp = await client.post(
+        f"{_base_url()}/chat/completions",
+        headers=_headers(),
+        json={
+            "model": model,
+            "messages": payload_messages,
+            "max_tokens": 600,
+            "temperature": 0.8,
+        },
+        timeout=60.0,
+    )
+    if resp.status_code >= 400:
+        logger.warning("OpenAI counsel chat failed: %s %s", resp.status_code, resp.text[:300])
+        raise RuntimeError("OpenAI 응답 오류")
+    content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+    if not content:
+        if tracks:
+            content = fallback_recommendation_reason(
+                messages[-1].get("content", "") if messages else "",
+                tracks,
+            )
+        else:
+            content = "말씀해 주신 분위기를 조금 더 구체적으로 알려주시면, 맞는 곡을 바로 골라 드릴게요."
+    return content, model
+
+
 async def generate_recommendation_reason(
     client: httpx.AsyncClient,
     user_query: str,
