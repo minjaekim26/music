@@ -2142,6 +2142,7 @@ async def recommend_by_genres(
             exclude_title=exclude_title,
             exclude_artist=exclude_artist,
             limit=limit,
+            country=country,
         )
         return {
             "genres": cleaned,
