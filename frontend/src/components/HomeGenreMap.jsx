@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import EveryNoiseMap, { computeLocalBounds, normalizeNodesInBounds } from "./EveryNoiseMap.jsx";
 import CountryPicker from "./CountryPicker.jsx";
 import { countryLabel, sortNodesForCountryPreview } from "../utils/countries.js";
+import { chipButtonClass } from "../utils/chipButton.js";
 
 function scoreMatch(node, query) {
   const name = node.name.toLowerCase();
@@ -152,11 +153,7 @@ export default function HomeGenreMap({
                 key={node.id}
                 type="button"
                 onClick={() => onToggleGenre(node.name)}
-                className={`rounded-full border px-2.5 py-0.5 text-[11px] transition ${
-                  selection.includes(node.name)
-                    ? "border-accent/50 bg-accent/15 text-accent"
-                    : "border-zinc-900/10 text-zinc-600 hover:bg-zinc-50 dark:border-white/10 dark:text-zinc-300 dark:hover:bg-white/10"
-                }`}
+                className={chipButtonClass(selection.includes(node.name))}
               >
                 {node.name}
               </button>
@@ -176,7 +173,7 @@ export default function HomeGenreMap({
                 key={g}
                 type="button"
                 onClick={() => onToggleGenre(g)}
-                className="rounded-full border border-accent/30 bg-accent/15 px-2.5 py-0.5 text-xs text-accent"
+                className={chipButtonClass(true, { size: "md" })}
               >
                 {g} ×
               </button>

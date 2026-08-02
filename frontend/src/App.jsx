@@ -11,6 +11,7 @@ import { TasteProfileCard } from "./components/TasteProfileCard.jsx";
 import { TrackRecommendList } from "./components/TrackRecommendList.jsx";
 import { PaginationBar, usePagination } from "./components/Pagination.jsx";
 import { classifySearchQuery } from "./utils/searchIntent.js";
+import { chipButtonClass } from "./utils/chipButton.js";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
@@ -88,33 +89,21 @@ function getInitialTheme() {
 
 function Chip({ children, variant = "default", onClick, active = false }) {
   const styles =
-    variant === "genre"
-      ? active
-        ? "bg-accent/20 text-accent border-accent/40 cursor-pointer dark:bg-accent/30 dark:text-white"
-        : "bg-accent/10 text-accent border-accent/30 cursor-pointer hover:bg-accent/15 dark:bg-accent/20 dark:text-violet-200 dark:hover:bg-accent/30"
-      : variant === "mood"
-        ? "bg-glow/10 text-pink-700 border-glow/25 dark:bg-glow/15 dark:text-pink-200 dark:border-glow/30"
-        : onClick
-          ? "bg-zinc-900/5 text-zinc-700 border-zinc-900/10 cursor-pointer hover:bg-zinc-900/10 dark:bg-white/5 dark:text-zinc-300 dark:border-white/10 dark:hover:bg-white/10"
-          : "bg-zinc-900/5 text-zinc-700 border-zinc-900/10 dark:bg-white/5 dark:text-zinc-300 dark:border-white/10";
+    variant === "mood"
+      ? "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium bg-glow/10 text-pink-700 border-glow/25 dark:bg-glow/15 dark:text-pink-200 dark:border-glow/30"
+      : onClick || variant === "genre"
+        ? chipButtonClass(active, { size: "md" })
+        : "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium bg-zinc-900/5 text-zinc-700 border-zinc-900/10 dark:bg-white/5 dark:text-zinc-300 dark:border-white/10";
 
   if (onClick) {
     return (
-      <button
-        type="button"
-        onClick={onClick}
-        className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition ${styles}`}
-      >
+      <button type="button" onClick={onClick} className={styles}>
         {children}
       </button>
     );
   }
 
-  return (
-    <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${styles}`}>
-      {children}
-    </span>
-  );
+  return <span className={styles}>{children}</span>;
 }
 
 function formatNumber(n) {
@@ -131,7 +120,7 @@ function SearchResult({ item, active, onSelect }) {
       onClick={() => onSelect(item)}
       className={`group flex w-full items-center gap-4 rounded-2xl border p-3 text-left transition ${
         active
-          ? "border-accent/50 bg-accent/10"
+          ? "border-accent bg-accent/15 ring-2 ring-accent/30 shadow-sm shadow-accent/20"
           : "border-zinc-900/10 bg-white hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
       }`}
     >
@@ -696,7 +685,7 @@ export default function App() {
                   type="button"
                   disabled={searching || recLoading}
                   onClick={() => handleSearch(undefined, chip)}
-                  className="rounded-full border border-zinc-900/10 px-2.5 py-0.5 text-[11px] font-medium text-zinc-600 transition hover:bg-zinc-50 disabled:opacity-50 dark:border-white/10 dark:text-zinc-300 dark:hover:bg-white/10"
+                  className={chipButtonClass(query === chip, { disabled: searching || recLoading })}
                 >
                   {chip}
                 </button>

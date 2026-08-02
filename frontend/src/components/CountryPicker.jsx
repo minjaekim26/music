@@ -1,5 +1,6 @@
 import React from "react";
 import { COUNTRIES } from "../utils/countries.js";
+import { chipButtonClass } from "../utils/chipButton.js";
 
 export default function CountryPicker({ value, onChange, compact = false }) {
   return (
@@ -12,11 +13,7 @@ export default function CountryPicker({ value, onChange, compact = false }) {
             key={c.id || "all"}
             type="button"
             onClick={() => onChange(c.id)}
-            className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition ${
-              active
-                ? "border-accent/50 bg-accent/15 text-accent"
-                : "border-zinc-900/10 text-zinc-600 hover:bg-zinc-50 dark:border-white/10 dark:text-zinc-300 dark:hover:bg-white/10"
-            }`}
+            className={chipButtonClass(active)}
           >
             {c.label}
           </button>

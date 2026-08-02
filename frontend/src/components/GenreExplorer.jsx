@@ -3,6 +3,7 @@ import EveryNoiseMap, { computeLocalBounds, normalizeNodesInBounds } from "./Eve
 import { PaginationBar, usePagination } from "./Pagination.jsx";
 import CountryPicker from "./CountryPicker.jsx";
 import { countryLabel } from "../utils/countries.js";
+import { chipButtonClass } from "../utils/chipButton.js";
 
 function scoreGenreSearchMatch(node, query, contextNode) {
   const name = node.name.toLowerCase();
@@ -280,11 +281,14 @@ export default function GenreExplorer({
                       onDoubleClick={() => handleGenreClick(node)}
                       className={`flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition ${
                         focusedId === node.id
-                          ? "bg-accent/15 font-medium text-accent"
+                          ? "bg-accent font-medium text-white shadow-sm shadow-accent/30 ring-2 ring-accent/25"
                           : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/10"
                       }`}
                     >
-                      <span className="truncate" style={{ color: focusedId === node.id ? undefined : node.color }}>
+                      <span
+                        className={`truncate ${focusedId === node.id ? "text-white" : ""}`}
+                        style={focusedId === node.id ? undefined : { color: node.color }}
+                      >
                         {node.name}
                       </span>
                       <span className="shrink-0 text-[10px] tabular-nums text-zinc-400">
@@ -313,7 +317,7 @@ export default function GenreExplorer({
                       key={g}
                       type="button"
                       onClick={() => onToggleGenre(g)}
-                      className="rounded-full border border-accent/30 bg-accent/15 px-2.5 py-0.5 text-xs text-accent"
+                      className={chipButtonClass(true, { size: "md" })}
                     >
                       {g} ×
                     </button>
@@ -342,11 +346,7 @@ export default function GenreExplorer({
                       key={sg.id}
                       type="button"
                       onClick={() => handleGenreClick(sg)}
-                      className={`rounded-full border px-2 py-0.5 text-[11px] ${
-                        selection.includes(sg.name)
-                          ? "border-accent/50 bg-accent/15 text-accent"
-                          : "border-zinc-900/10 text-zinc-600 dark:border-white/10 dark:text-zinc-300"
-                      }`}
+                      className={chipButtonClass(selection.includes(sg.name))}
                     >
                       {sg.name}
                     </button>
