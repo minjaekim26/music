@@ -1,5 +1,25 @@
-import React, { useMemo } from "react";
-import EveryNoiseMap from "./EveryNoiseMap.jsx";
+import React, { useMemo, useState } from "react";
+import EveryNoiseMap, { computeLocalBounds, normalizeNodesInBounds } from "./EveryNoiseMap.jsx";
+
+function scoreMatch(node, query) {
+  const name = node.name.toLowerCase();
+  const q = query.toLowerCase().trim();
+  if (!q) return 0;
+
+  let textScore = 0;
+  if (name === q) textScore = 100;
+  else if (name.startsWith(q)) textScore = 92;
+  else if (name.split(/\s+/).some((w) => w.startsWith(q))) textScore = 86;
+  else if (name.includes(` ${q}`) || name.includes(`${q} `)) textScore = 80;
+  else if (name.includes(q)) textScore = 72;
+
+  if (name.includes(q)) {
+    textScore += Math.max(0, 8 - (name.length - q.length) * 0.12);
+  }
+
+  const popScore = Math.min(100, ((node.fontSize || 100) / 160) * 100);
+  return textScore * 0.85 + popScore * 0.15;
+}
 
 export default function HomeGenreMap({
   nodes,
@@ -10,13 +30,47 @@ export default function HomeGenreMap({
   onRecommend,
   loading,
 }) {
+  const [genreSearch, setGenreSearch] = useState("");
   const selection = selectedGenres || [];
+  const searchQuery = genreSearch.trim().toLowerCase();
 
   const previewNodes = useMemo(() => {
     if (!nodes?.length) return [];
-    // 첫 화면: 상위·인기 장르만 보여 클릭 가능하게 유지
     return nodes.filter((n) => !n.parentId && (n.fontSize || 0) >= 118);
   }, [nodes]);
+
+  const searchMatches = useMemo(() => {
+    if (!searchQuery || !nodes?.length) return null;
+    return nodes
+      .filter((n) => n.name.toLowerCase().includes(searchQuery))
+      .map((n) => ({
+        ...n,
+        searchScore: Math.round(scoreMatch(n, searchQuery)),
+      }))
+      .sort(
+        (a, b) =>
+          b.searchScore - a.searchScore ||
+          (b.fontSize || 0) - (a.fontSize || 0) ||
+          a.name.localeCompare(b.name),
+      );
+  }, [searchQuery, nodes]);
+
+  const { displayNodes, displayBounds } = useMemo(() => {
+    if (!nodes?.length) return { displayNodes: [], displayBounds: bounds };
+    if (!searchMatches) {
+      return { displayNodes: previewNodes, displayBounds: bounds };
+    }
+    if (searchMatches.length === 0) {
+      return { displayNodes: [], displayBounds: bounds };
+    }
+    const subset = searchMatches.slice(0, 80);
+    if (!bounds) return { displayNodes: subset, displayBounds: bounds };
+    const local = computeLocalBounds(subset, bounds);
+    return {
+      displayNodes: normalizeNodesInBounds(subset, bounds, local),
+      displayBounds: { ...local, minLeft: 0, minTop: 0 },
+    };
+  }, [nodes, bounds, searchMatches, previewNodes]);
 
   return (
     <div className="overflow-hidden rounded-2xl border border-zinc-900/10 bg-white shadow-sm dark:border-white/10 dark:bg-white/5">
@@ -24,7 +78,7 @@ export default function HomeGenreMap({
         <div>
           <h3 className="font-display text-sm font-semibold text-zinc-900 dark:text-white">장르 맵</h3>
           <p className="mt-0.5 text-[11px] text-zinc-500">
-            장르를 클릭해 선택한 뒤 추천받으세요
+            검색하거나 맵에서 장르를 클릭해 선택하세요
           </p>
         </div>
         <button
@@ -36,15 +90,31 @@ export default function HomeGenreMap({
         </button>
       </div>
 
+      <div className="border-b border-zinc-900/10 px-3 py-2 dark:border-white/10">
+        <input
+          type="search"
+          value={genreSearch}
+          onChange={(e) => setGenreSearch(e.target.value)}
+          placeholder="장르 검색 — pop, rock, jazz, k-pop…"
+          className="w-full rounded-xl border border-zinc-900/10 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-accent/40 dark:border-white/10 dark:bg-black/30 dark:text-white dark:placeholder:text-zinc-500"
+        />
+      </div>
+
       {!nodes?.length ? (
         <div className="flex h-56 items-center justify-center text-sm text-zinc-500">
           장르 맵 로딩 중...
         </div>
+      ) : searchMatches && searchMatches.length === 0 ? (
+        <div className="flex h-56 items-center justify-center text-sm text-zinc-500">
+          ‘{genreSearch.trim()}’ 검색 결과 없음
+        </div>
       ) : (
         <EveryNoiseMap
-          nodes={previewNodes}
-          bounds={bounds}
+          nodes={displayNodes}
+          bounds={displayBounds}
           selectedGenres={selection}
+          searchQuery={searchQuery}
+          focusedId={searchMatches?.[0]?.id}
           height={320}
           showAll
           fitToView
@@ -52,11 +122,35 @@ export default function HomeGenreMap({
         />
       )}
 
+      {searchMatches && searchMatches.length > 0 && (
+        <div className="border-t border-zinc-900/10 px-3 py-2 dark:border-white/10">
+          <p className="mb-1.5 text-[11px] text-zinc-500">
+            검색 결과 · {searchMatches.length}
+          </p>
+          <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
+            {searchMatches.slice(0, 24).map((node) => (
+              <button
+                key={node.id}
+                type="button"
+                onClick={() => onToggleGenre(node.name)}
+                className={`rounded-full border px-2.5 py-0.5 text-[11px] transition ${
+                  selection.includes(node.name)
+                    ? "border-accent/50 bg-accent/15 text-accent"
+                    : "border-zinc-900/10 text-zinc-600 hover:bg-zinc-50 dark:border-white/10 dark:text-zinc-300 dark:hover:bg-white/10"
+                }`}
+              >
+                {node.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="space-y-3 border-t border-zinc-900/10 px-4 py-3 dark:border-white/10">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-xs text-zinc-500">선택</span>
           {selection.length === 0 ? (
-            <span className="text-xs text-zinc-400">— 맵에서 장르를 클릭하세요</span>
+            <span className="text-xs text-zinc-400">— 검색하거나 맵에서 장르를 클릭하세요</span>
           ) : (
             selection.map((g) => (
               <button
