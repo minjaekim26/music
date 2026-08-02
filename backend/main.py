@@ -100,7 +100,7 @@ async def search(
 ):
     client: httpx.AsyncClient = request.app.state.http_client
     try:
-        payload = await search_tracks(client, q, limit=min(max(limit, 1), 20), country=country)
+        payload = await search_tracks(client, q, limit=min(max(limit, 1), 50), country=country)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"음악 API 요청 실패: {exc}") from exc
     return {"query": q, **payload}

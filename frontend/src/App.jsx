@@ -433,7 +433,7 @@ export default function App() {
 
     try {
       if (intent.primary === "catalog") {
-        const params = new URLSearchParams({ q, limit: "20" });
+        const params = new URLSearchParams({ q, limit: "50" });
         appendCountry(params, selectedCountry);
         const res = await fetch(`${API_BASE}/api/search?${params}`);
         const data = await res.json().catch(() => ({}));

@@ -573,7 +573,7 @@ async def _gather_search_hits(
     mb_task = _mb_get(
         client,
         "/recording",
-        {"query": query, "fmt": "json", "limit": str(min(fetch_limit, 25))},
+        {"query": query, "fmt": "json", "limit": str(min(fetch_limit, 50))},
     )
     dz_task = _search_deezer_tracks(client, query, fetch_limit)
     sp_task = search_spotify_tracks(client, query, fetch_limit)
@@ -669,7 +669,7 @@ async def search_tracks(
             },
         }
 
-    fetch_limit = min(max(limit, 1), 20)
+    fetch_limit = min(max(limit, 1), 50)
     country_id = normalize_country(country)
     expansion = expand_search_queries(query)
     search_terms = list(expansion["queries"])
