@@ -51,7 +51,7 @@ from platform_search import (
     ytmusic_authenticated,
     youtube_api_configured,
 )
-from search_aliases import expand_search_queries, has_hangul, init_search_aliases_db
+from search_aliases import expand_search_queries, has_hangul, init_search_aliases_db, pick_canonical_search_query
 from track_metadata import normalize_for_genre_lookup
 import embedding as emb
 import track_cache
@@ -524,10 +524,27 @@ def _merge_search_hit(results: dict[str, dict], hit: dict) -> None:
     }
 
 
-async def _musicbrainz_expand_hangul_query(client: httpx.AsyncClient, query: str) -> str | None:
-    """MusicBrainz 아티스트 검색으로 한글 검색어를 영문명으로 보완."""
+async def _musicbrainz_canonical_query(client: httpx.AsyncClient, query: str) -> str | None:
+    """MusicBrainz로 한글 검색어 → 영문 아티스트·곡명(원명) 변환."""
     if not has_hangul(query):
         return None
+
+    try:
+        rec_data = await _mb_get(
+            client,
+            "/recording",
+            {"query": query, "fmt": "json", "limit": "5"},
+        )
+    except httpx.HTTPError:
+        rec_data = None
+
+    if isinstance(rec_data, dict):
+        for rec in rec_data.get("recordings", []):
+            title = (rec.get("title") or "").strip()
+            artist = _artist_name(rec.get("artist-credit", []))
+            if title and artist and not has_hangul(f"{artist} {title}"):
+                return f"{artist} {title}"
+
     try:
         data = await _mb_get(
             client,
@@ -657,8 +674,8 @@ async def search_tracks(
     expansion = expand_search_queries(query)
     search_terms = list(expansion["queries"])
 
-    if has_hangul(query) and not expansion["matches"]:
-        mb_name = await _musicbrainz_expand_hangul_query(client, query)
+    if has_hangul(query):
+        mb_name = await _musicbrainz_canonical_query(client, query)
         if mb_name:
             search_terms.append(mb_name)
             expansion["matches"].append({"from": query, "to": mb_name, "via": "musicbrainz"})
@@ -670,6 +687,9 @@ async def search_tracks(
         if key not in seen_terms:
             seen_terms.add(key)
             unique_terms.append(term)
+    unique_terms.sort(key=lambda t: (has_hangul(t), -len(t)))
+
+    canonical_query = pick_canonical_search_query(query, unique_terms)
 
     # Country is filter-only — do not merge tag-top hits into catalog search.
     results: dict[str, dict] = {}
@@ -692,8 +712,11 @@ async def search_tracks(
         for key, value in term_meta.items():
             meta[key] = meta[key] or value
 
-    relevance_queries = [query]
-    seen_rel: set[str] = {query.casefold()}
+    relevance_queries = [canonical_query]
+    seen_rel: set[str] = {canonical_query.casefold()}
+    if query.casefold() not in seen_rel:
+        seen_rel.add(query.casefold())
+        relevance_queries.append(query)
     for alt in unique_terms:
         if alt.casefold() not in seen_rel:
             seen_rel.add(alt.casefold())
@@ -704,9 +727,9 @@ async def search_tracks(
         title = item.get("title", "") or ""
         artist = item.get("artist", "") or ""
         listeners = item.get("listeners", 0)
-        rel = _search_relevance(query, title, artist, listeners)
+        rel = _search_relevance(canonical_query, title, artist, listeners)
         for alt in relevance_queries[1:]:
-            rel = max(rel, _search_relevance(alt, title, artist, listeners) * 0.97)
+            rel = max(rel, _search_relevance(alt, title, artist, listeners) * 0.92)
         # 정확도(관련도) 0% 결과는 검색 목록에서 제외
         if rel <= 0:
             continue
@@ -751,6 +774,7 @@ async def search_tracks(
             "ytmusic_authenticated": ytmusic_authenticated(),
             "youtube_api_configured": youtube_api_configured(),
             "query_original": query,
+            "query_canonical": canonical_query if canonical_query.casefold() != query.casefold() else None,
             "query_expanded": unique_terms if unique_terms != [query] else None,
             "alias_matches": expansion["matches"] or None,
             "country": country_id,
@@ -883,6 +907,9 @@ def _search_relevance_self_check() -> None:
     assert _official_rank({"title": "X", "artist": "Y", "source": "deezer", "deezer_id": 1}) < _official_rank(
         {"title": "Queen - X", "artist": "fan", "source": "ytmusic", "yt_video_id": "z"}
     )
+    hangul_rel = _search_relevance("드레이크", "God's Plan", "Drake", 1_000_000)
+    canon_rel = _search_relevance("drake", "God's Plan", "Drake", 1_000_000)
+    assert canon_rel > hangul_rel, (canon_rel, hangul_rel)
 
 
 def _search_sort_key(item: dict) -> tuple:

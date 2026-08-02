@@ -201,6 +201,17 @@ def expand_search_queries(query: str) -> dict[str, Any]:
     return {"original": original, "queries": unique, "matches": unique_matches}
 
 
+def pick_canonical_search_query(original: str, terms: list[str]) -> str:
+    """한/영 혼합 검색어에서 API·정확도용 영문(원명) 쿼리 선택."""
+    original = (original or "").strip()
+    if not terms:
+        return original
+    english = [t.strip() for t in terms if t.strip() and not has_hangul(t)]
+    if not english:
+        return original
+    return max(english, key=lambda t: (len([p for p in t.split() if len(p) > 1]), len(t)))
+
+
 def add_search_alias(alias: str, canonical: str, kind: str = "artist") -> bool:
     alias = alias.strip()
     canonical = canonical.strip()

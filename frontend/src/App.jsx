@@ -702,11 +702,11 @@ export default function App() {
             />
           )}
 
-          {searchMeta?.query_expanded?.length > 0 && (
+          {(searchMeta?.query_canonical || searchMeta?.query_expanded?.length > 0) && (
             <p className="border-t border-zinc-900/10 px-3 py-2 text-[11px] text-zinc-500 dark:border-white/10">
-              한글 검색어를 영문으로 변환해 검색했습니다:{" "}
+              원명으로 검색:{" "}
               <span className="text-zinc-700 dark:text-zinc-300">
-                {searchMeta.query_expanded.join(" · ")}
+                {searchMeta.query_canonical || searchMeta.query_expanded.join(" · ")}
               </span>
             </p>
           )}
