@@ -12,8 +12,7 @@ import { TrackRecommendList } from "./components/TrackRecommendList.jsx";
 import { PaginationBar, usePagination } from "./components/Pagination.jsx";
 import { classifySearchQuery } from "./utils/searchIntent.js";
 import { chipButtonClass } from "./utils/chipButton.js";
-import InfoTooltip from "./components/InfoTooltip.jsx";
-import { SIMILARITY_TOOLTIPS } from "./utils/similarityHelp.js";
+import AiReasonBox from "./components/AiReasonBox.jsx";
 import ChatFab from "./components/ChatFab.jsx";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
@@ -44,20 +43,6 @@ function searchEmptyHint(meta, query) {
     return "외부 음악 API에 연결하지 못했습니다. music/run-backend.ps1 실행 여부를 확인하세요 (포트 8020).";
   }
   return `'${query}'에 맞는 곡을 찾지 못했습니다. 영문 제목·아티스트로 검색해 보세요.`;
-}
-
-function AiReasonBox({ text, className = "", similarityMode = "track" }) {
-  if (!text) return null;
-  const tooltip = SIMILARITY_TOOLTIPS[similarityMode] || SIMILARITY_TOOLTIPS.track;
-  return (
-    <div className={`rounded-xl border border-accent/25 bg-accent/5 px-3 py-2.5 ${className}`}>
-      <p className="flex items-center text-[10px] font-semibold uppercase tracking-wide text-accent">
-        AI 추천 설명
-        <InfoTooltip text={tooltip} label="유사도 계산 방식" />
-      </p>
-      <p className="mt-1 text-[13px] leading-relaxed text-zinc-700 dark:text-zinc-200">{text}</p>
-    </div>
-  );
 }
 
 function fallbackAiReason(query, tracks) {
