@@ -14,6 +14,14 @@ import { classifySearchQuery } from "./utils/searchIntent.js";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
+const SEARCH_EXAMPLE_CHIPS = [
+  "BTS Dynamite",
+  "chill, lofi",
+  "밤에 혼자 듣기 좋은 몽환적인 노래",
+  "k-pop, dance pop",
+  "NewJeans Ditto",
+];
+
 function appendCountry(params, country) {
   if (country) params.set("country", country);
 }
@@ -412,10 +420,11 @@ export default function App() {
     };
   }, []);
 
-  async function handleSearch(e) {
+  async function handleSearch(e, searchText) {
     e?.preventDefault();
-    const q = query.trim();
+    const q = (searchText ?? query).trim();
     if (!q) return;
+    setQuery(q);
 
     const intent = classifySearchQuery(q);
     setSearchIntent(intent);
@@ -669,7 +678,7 @@ export default function App() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="곡, 아티스트, 키워드, 취향 자연어 검색"
+                placeholder="곡, 아티스트, 키워드 검색"
                 className="flex-1 bg-transparent px-3 py-2.5 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-white dark:placeholder:text-zinc-500"
               />
               <button
@@ -679,6 +688,19 @@ export default function App() {
               >
                 {searching || recLoading ? "…" : "검색"}
               </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 pt-1">
+              {SEARCH_EXAMPLE_CHIPS.map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  disabled={searching || recLoading}
+                  onClick={() => handleSearch(undefined, chip)}
+                  className="rounded-full border border-zinc-900/10 px-2.5 py-0.5 text-[11px] font-medium text-zinc-600 transition hover:bg-zinc-50 disabled:opacity-50 dark:border-white/10 dark:text-zinc-300 dark:hover:bg-white/10"
+                >
+                  {chip}
+                </button>
+              ))}
             </div>
             <div className="border-t border-zinc-900/10 px-3 py-2 dark:border-white/10">
               <CountryPicker value={selectedCountry} onChange={setSelectedCountry} />
