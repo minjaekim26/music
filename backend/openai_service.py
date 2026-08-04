@@ -47,6 +47,7 @@ def _openai_error_detail(resp: httpx.Response) -> str:
     low = msg.lower()
     provider = llm_config.provider_label()
     if resp.status_code == 429 or "quota" in code or "quota" in low or "insufficient_quota" in code:
+        llm_config.mark_rate_limited()
         if provider == "gemini":
             return "Gemini 무료 한도에 도달했어요. 내일 다시 시도하거나 Google AI Studio에서 한도를 확인해 주세요."
         if provider == "groq":
@@ -262,6 +263,15 @@ async def chat_taste_counseling(
         raise ValueError("AI API 키가 설정되지 않았습니다.")
 
     model = llm_config.counsel_model()
+    user_q = messages[-1].get("content", "") if messages else ""
+    if llm_config.is_rate_limited():
+        if tracks:
+            return fallback_recommendation_reason(user_q, tracks), model
+        return (
+            "Gemini 무료 한도에 잠시 걸렸어요. 잠시 후 다시 시도해 주세요.",
+            model,
+        )
+
     context = _build_curation_context(profile, tracks, keywords, country=country or profile.get("country"))
     payload_messages: list[dict[str, str]] = [
         {"role": "system", "content": f"{_COUNSELOR_SYSTEM}\n\n{context}"},
@@ -289,10 +299,10 @@ async def chat_taste_counseling(
     if resp.status_code >= 400:
         detail = _openai_error_detail(resp)
         logger.warning("OpenAI counsel chat failed: %s %s", resp.status_code, resp.text[:300])
+        user_q = messages[-1].get("content", "") if messages else ""
         if tracks:
-            user_q = messages[-1].get("content", "") if messages else ""
             return fallback_recommendation_reason(user_q, tracks), model
-        raise RuntimeError(detail)
+        return detail, model
     content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
     if not content:
         if tracks:
@@ -348,6 +358,9 @@ async def chat_genre_explanation(
         raise ValueError("AI API 키가 설정되지 않았습니다.")
 
     model = llm_config.counsel_model()
+    if llm_config.is_rate_limited():
+        return _genre_fallback_reply(genre, tracks), model
+
     context = _build_genre_context(genre, tracks, country=country)
     payload_messages: list[dict[str, str]] = [
         {"role": "system", "content": f"{_GENRE_GUIDE_SYSTEM}\n\n{context}"},
@@ -374,7 +387,7 @@ async def chat_genre_explanation(
         logger.warning("OpenAI genre chat failed: %s %s", resp.status_code, resp.text[:300])
         if tracks or genre.get("name"):
             return _genre_fallback_reply(genre, tracks), model
-        raise RuntimeError(detail)
+        return detail, model
     content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
     if not content:
         content = _genre_fallback_reply(genre, tracks)
@@ -389,7 +402,7 @@ async def generate_recommendation_reason(
     if not tracks:
         return ""
     fallback = fallback_recommendation_reason(user_query, tracks)
-    if not is_configured():
+    if not is_configured() or llm_config.is_rate_limited():
         return fallback
 
     model = _chat_model()

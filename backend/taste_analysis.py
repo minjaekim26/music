@@ -331,7 +331,10 @@ async def _call_intent_llm(
     system: str,
     user_content: str,
 ) -> dict[str, Any]:
-    model = llm_config.counsel_model()
+    if llm_config.is_rate_limited():
+        raise RuntimeError("LLM rate limited")
+
+    model = llm_config.chat_model()
     base_payload = {
         "model": model,
         "messages": [
@@ -351,6 +354,8 @@ async def _call_intent_llm(
             timeout=50.0,
         )
         if resp.status_code >= 400:
+            if resp.status_code == 429:
+                llm_config.mark_rate_limited()
             last_err = httpx.HTTPStatusError("LLM error", request=resp.request, response=resp)
             continue
         body = resp.json()

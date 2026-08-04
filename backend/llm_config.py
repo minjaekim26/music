@@ -3,10 +3,23 @@
 from __future__ import annotations
 
 import os
+import time
 
 # Google Gemini free tier — 2.5-flash-lite는 신규 키 404 → 2.0-flash-lite
 _GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
 _GEMINI_MODEL = "gemini-2.0-flash-lite"
+_RATE_LIMIT_COOLDOWN_SEC = 120.0
+_rate_limit_until: float = 0.0
+
+
+def mark_rate_limited(cooldown: float = _RATE_LIMIT_COOLDOWN_SEC) -> None:
+    """429/quota 후 잠시 LLM 호출 스킵 — rules/fallback만 사용."""
+    global _rate_limit_until
+    _rate_limit_until = time.monotonic() + cooldown
+
+
+def is_rate_limited() -> bool:
+    return time.monotonic() < _rate_limit_until
 
 
 def api_key() -> str:

@@ -294,8 +294,7 @@ async def chat(request: Request, body: ChatBody):
         genre_id = find_genre_for_chat(last_query)
         if genre_id:
             genre_ctx = get_genre_map_context(genre_id)
-            profile_pre = await analyze_chat_intent(client, msgs)
-            country = profile_pre.get("country") or chat_country
+            country = chat_country
             rec = await recommend_by_genre(
                 client,
                 genre_ctx["name"],
