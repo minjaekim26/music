@@ -887,10 +887,10 @@ def _search_relevance(query: str, title: str, artist: str, listeners: int = 0) -
     if re.search(r"\s-\s", title_l) and artist_l and artist_l not in title_l:
         head = title_l.split(" - ", 1)[0].strip()
         if head and head in q and head not in artist_l:
-            text *= 0.72
+            text *= 0.82
 
     if _is_cover_or_variant(title):
-        text *= 0.6
+        text *= 0.75
 
     pop = min(100.0, math.log10(max(int(listeners or 0), 0) + 1) * 20.0)
     return round(min(100.0, text * 0.85 + pop * 0.15), 1)
@@ -1114,12 +1114,12 @@ def _ko_reason_label(text: str) -> str:
     return _display_genre(raw)
 
 SIMILARITY_WEIGHTS: dict[str, float] = {
-    "genre": 0.32,
-    "mood": 0.18,
-    "tempo": 0.14,
+    "genre": 0.28,
+    "mood": 0.22,
+    "tempo": 0.18,
     "artist": 0.16,
-    "era": 0.12,
-    "listener": 0.08,
+    "era": 0.10,
+    "listener": 0.06,
 }
 
 
