@@ -1,27 +1,37 @@
 # Music Explorer — 작동 원리 & 코드 가이드
 
-이 문서는 **Music Explorer**가 어떻게 동작하는지, 주요 파일이 무엇을 하는지 처음부터 끝까지 설명합니다.
+이 문서는 **Music Explorer (distribution)** 가 어떻게 동작하는지, 주요 파일이 무엇을 하는지 처음부터 끝까지 설명합니다.
 
-파일 단위로 더 자세히 보려면 **[CODE_WALKTHROUGH.md](CODE_WALKTHROUGH.md)** 를 참고하세요.
+파일 단위로 더 자세히 보려면 **[CODE_WALKTHROUGH.md](CODE_WALKTHROUGH.md)** 를 참고하세요.  
+요청별 대응 기록은 **[USER_REQUEST_ANALYSIS.txt](USER_REQUEST_ANALYSIS.txt)** 를 보세요.
 
 - 저장소: https://github.com/minjaekim26/music
 - 라이브: https://music-ydqz.onrender.com
-- 스택: **FastAPI (Python)** + **React + Vite + Tailwind**
+- 스택: **FastAPI (Python)** + **React + Vite + Tailwind** + **Gemini (AI DJ)**
+- **마지막 문서 갱신:** 2026-08-04 — AI DJ, Gemini, 중복 추천 수정 반영
+
+> 코드를 바꿀 때 함께 갱신할 문서: `HOW_IT_WORKS.md`, `CODE_WALKTHROUGH.md`, `USER_REQUEST_ANALYSIS.txt`, `README.md` (API·기능 목록).
 
 ---
 
 ## 1. 한 줄로 요약
 
-사용자가 곡을 검색하면 → 여러 음악 API에서 결과를 모으고 → 태그를 Every Noise 장르 맵에 매핑해 위치를 계산하고 → 유사곡·장르 추천을 보여줍니다.
+사용자가 곡을 검색하면 → 여러 음악 API에서 결과를 모으고 → 태그를 Every Noise 장르 맵에 매핑해 위치를 계산하고 → 유사곡·장르 추천을 보여줍니다.  
+**AI DJ** 챗봇은 자연어 대화로 취향을 분석하고 실시간 곡 큐레이션 + 장르 맵 설명을 제공합니다.
 
 ```
 [브라우저 React]
       │  GET /api/search, /api/track, /api/recommend/...
+      │  POST /api/chat (AI DJ)
       ▼
 [FastAPI backend/main.py]
       │
       ├─ music_api.py        ← 검색·상세·추천 오케스트레이션
-      ├─ genre_map.py        ← Every Noise 좌표·유사도
+      ├─ genre_map.py        ← Every Noise 좌표·유사도·챗 장르 Q&A
+      ├─ taste_analysis.py   ← AI DJ 의도 분석 (LLM + rules)
+      ├─ openai_service.py   ← Gemini 답변·추천 이유
+      ├─ llm_config.py       ← Gemini/Groq/OpenAI 호환 env
+      ├─ country_filter.py   ← 국가 필터 (검색·추천·챗)
       ├─ lastfm_api.py       ← Last.fm
       ├─ platform_search.py  ← Spotify / SoundCloud / YT Music
       ├─ audiodb_api.py      ← TheAudioDB (배너·앨범아트)
@@ -50,11 +60,28 @@
 4. Last.fm 유사곡(+ Deezer 폴백)에 장르 유사도 점수 부여
 5. 프론트: 장르 막대, 확대된 하위 장르 맵, 추천 리스트
 
-### 2.3 장르 / 키워드 추천
+### 2.3 장르 / 키워드 / 취향 추천
 
-- 장르 칩 클릭 → `GET /api/recommend/genre?genre=...`
+- 장르 칩 클릭 → `GET /api/recommend/genre?genre=...&country=...`
 - 맵에서 여러 장르 선택 → `GET /api/recommend/genres?genres=...`
 - 키워드 UI → `GET /api/recommend/keywords?keywords=...`
+- 자연어 취향(홈 검색) → `GET /api/recommend/taste?query=...` (+ AI 추천 이유)
+- 국가 필터: `country=kr|jp|us|...` — **맵 노드는 그대로**, 추천·검색 결과만 필터
+
+### 2.4 AI DJ (챗봇)
+
+1. 플로팅 버튼 `ChatFab` → `/chat` 페이지 (`ChatPage.jsx`)
+2. 사용자 메시지 + **이전 턴 추천 곡**(`exclude_tracks`)을 `POST /api/chat`에 전송
+3. 백엔드 분기:
+   - **genre 모드**: «hyperpop이 뭐야?»처럼 장르 설명 질문 → `find_genre_for_chat` → 맵 컨텍스트 + 해당 장르 추천 + LLM 설명
+   - **taste 모드**: 상황·기분·키워드 큐레이션 → `analyze_chat_intent` → `recommend_by_keywords`
+4. LLM(Gemini Flash)이 대화체 답변 생성, 응답 JSON에 `tracks`, `keywords_used`, `country`, `taste_profile` 포함
+
+**중복 추천 방지 (2026-08-04):**
+
+- `pick_search_keywords()` — `korean trap` 같은 구체 구문 우선, `k-pop` 같은 범용 태그는 Last.fm 검색 후순위
+- rules 폴백(LLM 실패 시) — **마지막 사용자 메시지만** 분석 (이전 턴 키워드 누적 방지)
+- `exclude_tracks` — 세션에서 이미 추천한 title|artist 키 제외
 
 ---
 
@@ -65,7 +92,12 @@ music/
 ├── backend/
 │   ├── main.py                 # FastAPI 앱·라우트·정적 파일 서빙
 │   ├── music_api.py            # 핵심 비즈니스 로직
-│   ├── genre_map.py            # 장르 맵·프로필·유사도
+│   ├── genre_map.py            # 장르 맵·프로필·유사도·챗 장르 Q&A
+│   ├── taste_analysis.py       # AI DJ 의도 분석 (LLM + rules)
+│   ├── openai_service.py       # LLM 답변·추천 이유
+│   ├── llm_config.py           # Gemini/Groq/OpenAI 호환 env
+│   ├── country_filter.py       # 국가 필터
+│   ├── embedding.py / track_cache.py / audio_analyzer.py
 │   ├── lastfm_api.py           # Last.fm 래퍼
 │   ├── platform_search.py      # Spotify / SC / YT Music
 │   ├── audiodb_api.py          # TheAudioDB UI 메타
@@ -78,14 +110,13 @@ music/
 │       └── setup_ytmusic.py         # YT Music 헤더 설정
 ├── frontend/
 │   └── src/
-│       ├── App.jsx             # 화면·상태·API 호출
+│       ├── App.jsx             # 홈·검색·상세
+│       ├── pages/ChatPage.jsx  # AI DJ 채팅
 │       └── components/
-│           ├── GenreMap.jsx / EveryNoiseMap.jsx
-│           ├── GenreBars.jsx / GenreExplorer.jsx
-│           ├── KeywordRecommend.jsx
-│           ├── TrackRecommendList.jsx
-│           └── HelpPanel.jsx / Pagination.jsx
-├── docs/HOW_IT_WORKS.md        # 이 문서
+│           ├── ChatFab.jsx / AiReasonBox.jsx / HomeGenreMap.jsx
+│           ├── GenreMap.jsx / EveryNoiseMap.jsx / GenreExplorer.jsx
+│           └── HelpPanel.jsx / Pagination.jsx / ...
+├── docs/                       # HOW_IT_WORKS, CODE_WALKTHROUGH, USER_REQUEST_ANALYSIS
 ├── Dockerfile / render.yaml    # Render 배포
 └── README.md
 ```
@@ -105,13 +136,18 @@ music/
 
 | 경로 | 함수 | 설명 |
 |------|------|------|
-| `GET /api/health` | `health` | 키/인증 상태 점검 |
+| `GET /api/health` | `health` | 키/인증/LLM 상태 점검 |
 | `GET /api/genre-map` | `genre_map` | 전체 장르 노드 |
+| `GET /api/countries` | `countries` | 국가 필터 목록 |
 | `GET /api/search` | `search` | 다중 소스 검색 |
 | `GET /api/track` | `track_detail` | 곡 분석 |
 | `GET /api/recommend/genre` | `genre_recommendations` | 단일 장르 추천 |
 | `GET /api/recommend/genres` | `genres_recommendations` | 다중 장르 추천 |
 | `GET /api/recommend/keywords` | `keyword_recommendations` | 키워드 추천 |
+| `GET /api/recommend/taste` | `taste_recommendations` | 자연어 취향 → 키워드 추천 + AI 이유 |
+| `POST /api/taste/analyze` | `taste_analyze` | 취향 JSON만 분석 |
+| `POST /api/chat` | `chat` | **AI DJ** — 대화 + 곡 큐레이션 |
+| `POST /api/analyze` | `analyze_audio_file` | MP3 등 업로드 librosa 분석 |
 
 `track_detail`은 `mbid` / `deezer_id` / `soundcloud_id` / `title+artist` 중 하나 이상 필요합니다.
 
@@ -166,10 +202,57 @@ music/
 
 - `recommend_by_genre` / `recommend_by_genres`: Last.fm tag top tracks 등을 가져와 장르 프로필과 비교
 - `recommend_by_keywords`: 키워드가 태그로 얼마나 겹치는지로 점수화
+  - `search_keywords` — Last.fm 검색에 쓸 구체 키워드 (AI DJ)
+  - `exclude_keys` — 이미 추천한 title|artist 제외
+  - `track_dedupe_key()` — 정규화 dedupe 키
 
 ---
 
-### 4.3 `backend/genre_map.py` — Every Noise 장르 공간
+### 4.3 `backend/taste_analysis.py` — AI DJ 의도 분석
+
+| 함수 | 하는 일 |
+|------|---------|
+| `analyze_chat_intent` | 대화 전체 컨텍스트 → mood/genre/tempo/country/keywords JSON (Gemini) |
+| `analyze_taste_query` | 단일 자연어 쿼리 분석 |
+| `profile_to_keywords` | 프로필 → 검색 키워드 리스트 |
+| `pick_search_keywords` | Last.fm 검색용 — 구체 구문 우선, k-pop 등 범용 태그 후순위 |
+| `enrich_keywords_with_country` | 국가별 compound 키워드 (예: kr + trap → korean trap) |
+| `analyze_taste_rules` | LLM 실패 시 규칙 기반 폴백 |
+
+LLM 실패 시 rules는 **마지막 user 메시지만** 사용 — 멀티턴에서 이전 키워드가 섞이지 않게.
+
+---
+
+### 4.4 `backend/openai_service.py` + `llm_config.py`
+
+**llm_config** — OpenAI 호환 API 통합 env:
+
+| 변수 | 기본 | 용도 |
+|------|------|------|
+| `OPENAI_API_KEY` | (필수) | Gemini 키도 여기 |
+| `OPENAI_BASE_URL` | Gemini OpenAI 호환 URL | Groq/OpenRouter/OpenAI 전환 가능 |
+| `OPENAI_MODEL` | `gemini-2.5-flash-lite` | 일반 chat |
+| `OPENAI_COUNSEL_MODEL` | `gemini-2.5-flash` | AI DJ 답변·장르 설명 (품질 우선) |
+
+**openai_service**:
+
+- `chat_taste_counseling` — taste 모드 AI DJ 답변
+- `chat_genre_explanation` — genre 모드 장르 설명
+- `generate_recommendation_reason` — 추천 리스트 한국어 이유
+- `create_embedding` — OpenAI embedding (Gemini 키만 있으면 skip)
+- quota/401 시 한국어 fallback 메시지
+
+---
+
+### 4.5 `backend/country_filter.py`
+
+8개국(kr/jp/us/uk/fr/br/mx/latin) 태그·아티스트 국적 매칭.  
+`infer_country_from_query` — «한국 트랩» 등 챗/검색에서 country 자동 추론.  
+검색 pool에 country 태그 merge 안 함 (필터 전용).
+
+---
+
+### 4.6 `backend/genre_map.py` — Every Noise 장르 공간
 
 데이터: `backend/data/everynoise_genres.json`  
 (스크립트 `build_everynoise_map.py`로 everynoise.com 스타일 좌표 생성)
@@ -222,9 +305,14 @@ music/
 - 자식이 없으면 **부모 + 형제**
 - 곡 위치에서 가까운 순으로 child_limit(기본 100)개
 
+**챗 전용:**
+
+- `find_genre_for_chat` — «○○이 뭐야?» 장르 Q&A면 genre id, «골라줘/추천» 큐레이션은 None
+- `get_genre_map_context` — 부모·자식·인근 장르 + 색상 (AI DJ GenreBriefCard용)
+
 ---
 
-### 4.4 `backend/lastfm_api.py`
+### 4.7 `backend/lastfm_api.py`
 
 Last.fm API 래퍼:
 
@@ -235,7 +323,7 @@ Last.fm API 래퍼:
 
 ---
 
-### 4.5 `backend/platform_search.py`
+### 4.8 `backend/platform_search.py`
 
 | 플랫폼 | 인증 | 역할 |
 |--------|------|------|
@@ -247,14 +335,14 @@ YT Music 헤더는 Chrome에서 복사한 request header를 쓰며, `_sanitize_y
 
 ---
 
-### 4.6 `backend/audiodb_api.py`
+### 4.9 `backend/audiodb_api.py`
 
 TheAudioDB에서 아티스트 배너, 앨범 썸네일, mood/style, biography를 가져와 UI용 `enrich_ui()`로 합칩니다.  
 장르 분류의 주력이라기보다 **시각·설명 보강**입니다.
 
 ---
 
-### 4.7 `backend/search_aliases.py` / `track_metadata.py`
+### 4.10 `backend/search_aliases.py` / `track_metadata.py`
 
 - **search_aliases**: 한글 검색어 → 영문 별칭 DB/시드 확장
 - **track_metadata**: feat./remix 표기 등 장르 조회용 제목·아티스트 정규화
@@ -324,6 +412,14 @@ top  = bounds.minTop  + (node.y / 1000) * bounds.height
 | `TrackRecommendList.jsx` | 유사곡 리스트 (similarity 표시) |
 | `Pagination.jsx` | 검색/추천 페이지네이션 |
 | `HelpPanel.jsx` | 사용법 도움말 |
+| `ChatFab.jsx` | 플로팅 AI DJ 진입 버튼 |
+| `ChatPage.jsx` | AI DJ 채팅 — starter prompts, quick shortcuts, track cards |
+| `MusicNote3D.jsx` | 챗 아바타 (bounce/tilt) |
+| `AiReasonBox.jsx` | AI 추천 이유 + 유사도 툴팁 |
+| `CountryPicker.jsx` | 국가 필터 칩 |
+| `HomeGenreMap.jsx` | 홈 장르 맵 미리보기 |
+| `GenreRecommendFooter.jsx` | 장르 추천 하단 CTA |
+| `chipButton.js` | active 칩 공통 스타일 |
 
 `TrackRecommendList`는 `similarity ?? genre_similarity ?? 0` 순으로 %를 표시합니다.  
 (`genre_similarity`가 0일 때 `??` 때문에 잘못 0으로만 보이던 버그를 이렇게 수정했습니다.)
@@ -372,8 +468,18 @@ percent = min(100, cos * 100)
 | YouTube Music | 선택 | 검색 보강 |
 | TheAudioDB | 선택 | 배너·앨범 아트 |
 | everynoise_genres.json | **필수 (로컬 파일)** | 맵 좌표 |
+| Google Gemini | AI DJ·추천 이유 | `OPENAI_API_KEY` + base URL |
 
 환경 변수는 `.env` / Render Dashboard에 설정합니다. `render.yaml`의 `sync: false` 항목은 대시보드에서 직접 넣습니다.
+
+**Render AI DJ 기본값 (render.yaml):**
+
+```env
+OPENAI_API_KEY=<Google AI Studio 키>
+OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+OPENAI_MODEL=gemini-2.5-flash-lite
+OPENAI_COUNSEL_MODEL=gemini-2.5-flash
+```
 
 ---
 
@@ -427,13 +533,23 @@ SC가 주는 `genre`/`tag_list`가 넓은 경우가 많고, 신인 아티스트�
 
 ---
 
-## 11. 변경 이력에 가까운 최근 개선 (요약)
+## 11. 변경 이력 (최근)
 
-- 검색: 관련도 0% 숨김, 관련도 내림차순
-- 장르: leaf/하위 장르 우선 분류
-- 분석 맵: `subgenre_nodes` + fit-to-view로 가독성 개선
-- 추천 %: `similarity ?? genre_similarity` 표시 수정
-- 배포: Render Docker + 정적 프론트 통합
+| 커밋 | 내용 |
+|------|------|
+| 7558e7e | AI DJ — 질문마다 다른 곡: `pick_search_keywords`, `exclude_tracks`, rules 폴백 |
+| 8038870 | ChatPage Vite 빌드 수정 |
+| 127bdc9 | AI DJ 멀티턴 대화 컨텍스트 의도 분석 |
+| b601834 | 한국 트랩 등 지역 요청 country 필터 |
+| 27c1bbb | AI 추천 설명 UI (AiReasonBox) |
+| 2c414a4 | distribution UI — 칩, 맵 모달, 스트리밍 CTA |
+| 47c8557 | OpenAI → Gemini 무료 tier 기본 |
+| 868b411 | AI API 오류·quota graceful fallback |
+| 3068a17 | 취향상담소 → **AI DJ** 브랜딩 |
+| 78ba20d | 장르 맵 Q&A + quick shortcut 칩 |
+| 51a93d1 | 챗 = taste counseling + live track curation |
+| a6fb85d | OpenAI 챗봇 + MusicNote 아바타 |
+| (이전) | 검색 relevance, official-first, 국가 필터, AND 장르 등 — `USER_REQUEST_ANALYSIS.txt` |
 
 ---
 

@@ -1,11 +1,15 @@
 # Music Explorer — 파일별 코드 설명
 
 디렉터리에 있는 **소스·설정 파일**을 하나씩 열어 무엇을 하는지 정리한 문서입니다.  
-전체 파이프라인 요약은 [HOW_IT_WORKS.md](HOW_IT_WORKS.md)를 보세요.
+전체 파이프라인 요약은 [HOW_IT_WORKS.md](HOW_IT_WORKS.md)를 보세요.  
+요청별 대응 기록: [USER_REQUEST_ANALYSIS.txt](USER_REQUEST_ANALYSIS.txt)
 
 - 저장소: https://github.com/minjaekim26/music
 - 앱 이름(UI): **distribution**
 - 개발 포트: 백엔드 **8020** · 프론트 **5173** (배포 시 보통 **8080**)
+- **마지막 갱신:** 2026-08-04
+
+> 코드 변경 시 함께 갱신: 이 문서, `HOW_IT_WORKS.md`, `USER_REQUEST_ANALYSIS.txt`, `README.md`
 
 > 제외: `node_modules/`, `frontend/dist/`, `__pycache__/`, `.git/`,  
 > `everynoise_genres.json` 본문(수만 줄), `ytmusic*.json` 시크릿, `package-lock.json` 덤프
@@ -31,6 +35,13 @@ music/
 │   ├── main.py
 │   ├── music_api.py
 │   ├── genre_map.py
+│   ├── taste_analysis.py
+│   ├── openai_service.py
+│   ├── llm_config.py
+│   ├── country_filter.py
+│   ├── embedding.py
+│   ├── track_cache.py
+│   ├── audio_analyzer.py
 │   ├── lastfm_api.py
 │   ├── platform_search.py
 │   ├── audiodb_api.py
@@ -41,6 +52,7 @@ music/
 │   └── scripts/             # 맵 빌드, YT Music 설정
 ├── frontend/                # React + Vite + Tailwind
 │   ├── src/App.jsx, main.jsx, index.css
+│   ├── src/pages/ChatPage.jsx
 │   └── src/components/...
 ├── docs/                    # HOW_IT_WORKS, CODE_WALKTHROUGH
 ├── Dockerfile, render.yaml, docker-compose.yml, railway.toml
@@ -55,10 +67,19 @@ music/
 브라우저 → App.jsx
         → /api/* (Vite 프록시 → :8020)
         → main.py
-        → music_api.py
+        → music_api.py / taste_analysis.py / openai_service.py
              ├ lastfm / audiodb / platform_search
              ├ genre_map (everynoise JSON)
-             └ search_aliases / track_metadata
+             └ search_aliases / track_metadata / country_filter
+```
+
+AI DJ 흐름:
+
+```
+ChatPage.jsx → POST /api/chat
+            → analyze_chat_intent (taste) 또는 find_genre_for_chat (genre)
+            → recommend_by_keywords / recommend_by_genre
+            → chat_taste_counseling / chat_genre_explanation
 ```
 
 ---
@@ -78,6 +99,21 @@ music/
 | `GET /api/recommend/genre` | `genre_recommendations` | 단일 장르 추천 |
 | `GET /api/recommend/genres` | `genres_recommendations` | 다중 장르 |
 | `GET /api/recommend/keywords` | `keyword_recommendations` | 키워드 추천 |
+| `GET /api/countries` | `countries` | 국가 필터 목록 |
+| `GET /api/recommend/taste` | `taste_recommendations` | 자연어 취향 + AI 이유 |
+| `POST /api/taste/analyze` | `taste_analyze` | 취향 JSON만 |
+| `POST /api/chat` | `chat` | **AI DJ** — 대화 + 곡 큐레이션 |
+| `POST /api/analyze` | `analyze_audio_file` | librosa 오디오 분석 |
+
+**ChatBody** (`POST /api/chat`):
+
+- `messages`: `{role, content}[]` (최대 30)
+- `exclude_tracks`: `{title, artist}[]` — 이미 추천한 곡 제외 (프론트가 이전 assistant tracks 전송)
+
+**chat 분기**
+
+1. `find_genre_for_chat(last_query)` → genre id 있으면 **genre 모드** (맵 설명 + 장르 추천)
+2. 아니면 **taste 모드**: `analyze_chat_intent` → `pick_search_keywords` → `recommend_by_keywords(..., exclude_keys=...)`
 
 **보조 함수**
 
@@ -101,7 +137,8 @@ music/
 | `get_static_genre_map` | 맵 JSON을 API용으로 노출 |
 | `recommend_by_genre` | Last.fm tag top + Deezer genre 검색 → 유사도 |
 | `recommend_by_genres` | 여러 장르를 합쳐 동일 파이프라인 |
-| `recommend_by_keywords` | 키워드 히트 수(specificity)로 필터·점수 |
+| `recommend_by_keywords` | 키워드 히트 수(specificity)로 필터·점수; `search_keywords`, `exclude_keys` 지원 |
+| `track_dedupe_key` | title|artist 정규화 dedupe 키 |
 
 **검색 파이프라인**
 
@@ -156,9 +193,75 @@ music/
 - `_match_genre_id` — 정규화 + `EXTRA_ALIASES` (`kpop`→`k-pop`, `r&b`→`rhythm and blues` 등)
 - 파일 없으면 `FileNotFoundError` (먼저 `build_everynoise_map.py` 실행)
 
+**챗 전용**
+
+- `find_genre_for_chat(query)` — «hyperpop이 뭐야?» → genre id; «골라줘/추천» → None (taste로)
+- `get_genre_map_context(genre_id)` — 부모·자식·인근 장르 (AI DJ GenreBriefCard)
+
 ---
 
-### 2.4 `backend/lastfm_api.py` — Last.fm
+### 2.4 `backend/taste_analysis.py` — AI DJ 의도
+
+| 함수 | 하는 일 |
+|------|---------|
+| `analyze_chat_intent(client, messages)` | 멀티턴 대화 → mood/genre/tempo/country/keywords JSON |
+| `analyze_taste_query` | 단일 쿼리 분석 |
+| `profile_to_keywords` | 프로필 → 검색 키워드 |
+| `pick_search_keywords` | Last.fm 검색용 — 구체 구문 우선, k-pop 등 범용 태그 후순위 |
+| `enrich_keywords_with_country` | kr + trap → korean trap 등 compound |
+| `analyze_taste_rules` | LLM 실패 시 규칙 폴백 (**마지막 user 메시지만**) |
+
+---
+
+### 2.5 `backend/openai_service.py` — LLM 응답
+
+| 함수 | 하는 일 |
+|------|---------|
+| `chat_taste_counseling` | taste 모드 AI DJ 답변 |
+| `chat_genre_explanation` | genre 모드 장르 설명 |
+| `generate_recommendation_reason` | 추천 리스트 한국어 이유 |
+| `create_embedding` | OpenAI embedding (Gemini-only면 skip) |
+| `is_configured` | API 키 유무 |
+
+quota/401/404 시 `_openai_error_detail`로 한국어 메시지.
+
+---
+
+### 2.6 `backend/llm_config.py` — LLM env
+
+| 함수/변수 | 기본 |
+|-----------|------|
+| `base_url()` | Gemini OpenAI 호환 URL |
+| `chat_model()` | `gemini-2.5-flash-lite` |
+| `counsel_model()` | `gemini-2.5-flash` (AI DJ) |
+| `provider_label()` | gemini / groq / openrouter / openai |
+
+env: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, `OPENAI_COUNSEL_MODEL`
+
+---
+
+### 2.7 `backend/country_filter.py` — 국가 필터
+
+| 함수 | 하는 일 |
+|------|---------|
+| `list_countries` | API `/api/countries` |
+| `normalize_country` | kr/jp/us/... |
+| `infer_country_from_query` | «한국 트랩» 등 텍스트에서 country 추론 |
+| `track_matches_country` | strict 태그·AudioDB strCountry 매칭 |
+
+맵 노드는 필터하지 않음 — 추천·검색 결과만.
+
+---
+
+### 2.8 `backend/embedding.py` / `track_cache.py` / `audio_analyzer.py`
+
+- **embedding**: OpenAI embedding 래퍼 (선택)
+- **track_cache**: 트랙 메타 SQLite 캐시
+- **audio_analyzer**: librosa tempo/energy/mfcc — `POST /api/analyze`
+
+---
+
+### 2.9 `backend/lastfm_api.py` — Last.fm
 
 | 함수 | API |
 |------|-----|
@@ -173,7 +276,7 @@ music/
 
 ---
 
-### 2.5 `backend/audiodb_api.py` — TheAudioDB
+### 2.10 `backend/audiodb_api.py` — TheAudioDB
 
 | 함수 | 하는 일 |
 |------|---------|
@@ -184,7 +287,7 @@ music/
 
 ---
 
-### 2.6 `backend/platform_search.py` — Spotify / SoundCloud / YT Music
+### 2.11 `backend/platform_search.py` — Spotify / SoundCloud / YT Music
 
 | 함수 | 하는 일 |
 |------|---------|
@@ -204,7 +307,7 @@ music/
 
 ---
 
-### 2.7 `backend/track_metadata.py`
+### 2.12 `backend/track_metadata.py`
 
 **역할:** 장르 조회 전에 제목/아티스트 정규화.
 
@@ -216,7 +319,7 @@ music/
 
 ---
 
-### 2.8 `backend/search_aliases.py`
+### 2.13 `backend/search_aliases.py`
 
 **역할:** 한글·오타 검색어를 영문 canonical으로 확장.
 
@@ -232,10 +335,11 @@ music/
 
 ---
 
-### 2.9 `backend/requirements.txt`
+### 2.14 `backend/requirements.txt`
 
 ```
-fastapi, uvicorn[standard], httpx, python-dotenv, ytmusicapi
+fastapi, uvicorn, httpx, python-dotenv, ytmusicapi
+librosa, soundfile, python-multipart, openai
 ```
 
 ---
@@ -368,6 +472,40 @@ specificity 바 + TrackRecommendList.
 
 한국어 도움말 모달 (검색·맵·키워드·데이터 소스 설명).
 
+### 4.13 `frontend/src/pages/ChatPage.jsx` — AI DJ
+
+- starter prompts + quick shortcut 칩 (비 오는 날, 트랩, lo-fi 등)
+- `POST /api/chat` — `messages` + `exclude_tracks` (이전 턴 추천 곡)
+- 응답: `reply`, `mode` (taste|genre), `tracks`, `taste_profile`, `keywords_used`, `country`
+- `ChatTrackCard` — Spotify 링크, `GenreBriefCard` — 장르 맵 Q&A
+- `TasteChips` — country/keyword 칩, `MusicNote3D` 아바타
+
+### 4.14 `frontend/src/components/ChatFab.jsx`
+
+플로팅 버튼 → `/chat` (nav.js).
+
+### 4.15 `frontend/src/components/AiReasonBox.jsx`
+
+AI 추천 이유 박스 + `InfoTooltip` 유사도 breakdown.
+
+### 4.16 `frontend/src/components/CountryPicker.jsx`
+
+국가 필터 칩 — `chipButton.js` active 스타일.
+
+### 4.17 `frontend/src/components/HomeGenreMap.jsx`
+
+홈 장르 맵 미리보기 — 검색·선택·추천, 0 match 시 추천 초기화.
+
+### 4.18 `frontend/src/utils/`
+
+| 파일 | 역할 |
+|------|------|
+| `chipButton.js` | active 칩 공통 class |
+| `similarityHelp.js` | 유사도 툴팁 문구 |
+| `countries.js` | 국가 라벨 |
+| `nav.js` | 홈/챗 라우팅 |
+| `searchIntent.js` | 검색 의도 힌트 |
+
 ### 4.12 프론트 설정 파일
 
 | 파일 | 내용 |
@@ -442,11 +580,19 @@ venv, `node_modules`, `dist`, `.env`, `ytmusic*.json`, `search_aliases.db`, `.cu
 | `YTMUSIC_HEADERS_FILE` / `YTMUSIC_HEADERS_JSON` | platform_search | YT Music 인증 |
 | `SERVE_STATIC` | main | `frontend/dist` 서빙 |
 | `HOST` / `PORT` | 배포 | uvicorn 바인딩 |
+| `OPENAI_API_KEY` | llm_config, openai_service | Gemini 키도 여기 |
+| `OPENAI_BASE_URL` | llm_config | 기본 Gemini OpenAI 호환 |
+| `OPENAI_MODEL` | llm_config | flash-lite |
+| `OPENAI_COUNSEL_MODEL` | llm_config | AI DJ flash |
+| `OPENAI_EMBED_API_KEY` | openai_service | embedding 전용 (선택) |
+
 | `VITE_API_BASE` | 프론트 빌드 | API origin (보통 빈 값) |
 
 ---
 
 ## 읽는 순서 추천
+
+**검색·맵**
 
 1. `main.py` 라우트만  
 2. `music_api.search_tracks` → `get_track_detail`  
@@ -454,4 +600,10 @@ venv, `node_modules`, `dist`, `.env`, `ytmusic*.json`, `search_aliases.db`, `.cu
 4. `App.jsx`의 `handleSearch` / `loadDetail`  
 5. `GenreMap.jsx` → `EveryNoiseMap.jsx`
 
-이 다섯 파일이면 “검색 → 태그 → 맵 → 화면”이 연결됩니다.
+**AI DJ**
+
+1. `ChatPage.jsx` → `POST /api/chat`  
+2. `main.py` `chat()` 분기 (genre vs taste)  
+3. `taste_analysis.analyze_chat_intent` + `pick_search_keywords`  
+4. `music_api.recommend_by_keywords`  
+5. `openai_service.chat_taste_counseling`

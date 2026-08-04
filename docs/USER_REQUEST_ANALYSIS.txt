@@ -255,6 +255,106 @@
     - Render health: /api/health
 
 
+--------------------------------------------------------------------------------
+[R] AI DJ 챗봇 — OpenAI + 3D 아바타
+--------------------------------------------------------------------------------
+  요청: ChatGPT 스타일 챗 + 음악 상담 + 3D 음표 아바타
+
+  조치:
+    - POST /api/chat, ChatPage.jsx, ChatFab, MusicNote3D
+    - taste_analysis + openai_service
+    - 커밋: 8bc6dfb, a6fb85d, 51a93d1
+
+
+--------------------------------------------------------------------------------
+[S] AI DJ — live track curation + 장르 Q&A
+--------------------------------------------------------------------------------
+  요청: 모호한 상황/키워드 → 곡 큐레이션; «hyperpop이 뭐야?» 장르 맵 설명
+
+  조치:
+    - find_genre_for_chat / get_genre_map_context (genre 모드 vs taste 모드)
+    - quick shortcut 칩, GenreBriefCard
+    - 커밋: 78ba20d, 3068a17 (AI DJ 브랜딩)
+
+
+--------------------------------------------------------------------------------
+[T] AI API 오류 / OpenAI → Gemini
+--------------------------------------------------------------------------------
+  요청: OpenAI quota 오류; 무료 API 전환
+
+  문제: quota 초과 시 챗 전체 502; OpenAI 유료
+
+  조치:
+    - openai_service graceful fallback, 한국어 quota 메시지
+    - llm_config → Gemini 기본 (flash-lite + counsel flash)
+    - render.yaml OPENAI_BASE_URL / MODEL / COUNSEL_MODEL
+    - 커밋: 868b411, 47c8557
+
+
+--------------------------------------------------------------------------------
+[U] distribution UI 개선
+--------------------------------------------------------------------------------
+  요청: 타이포, 칩, 장르 맵 모달, 스트리밍 CTA
+
+  조치:
+    - chipButton.js, HomeGenreMap, GenreExplorer, TrackRecommendList
+    - GenreRecommendFooter, Hero
+    - 커밋: 2c414a4
+
+
+--------------------------------------------------------------------------------
+[V] AI 추천 설명 UI
+--------------------------------------------------------------------------------
+  요청: emoji·가독성·AiReasonBox polish
+
+  조치:
+    - AiReasonBox.jsx, InfoTooltip + similarityHelp
+    - 커밋: 27c1bbb, 3ca41e7 (툴팁)
+
+
+--------------------------------------------------------------------------------
+[W] AI DJ — 한국 트랩 / country / 멀티턴 의도
+--------------------------------------------------------------------------------
+  요청: «한국 트랩»이 일반 trap/k-pop으로 섞임; 대화 맥락 이해
+
+  조치:
+    - analyze_chat_intent: full conversation, Korean rules
+    - country → recommend_by_keywords
+    - find_genre_for_chat: curation 요청은 genre Q&A로 빠지지 않게
+    - 커밋: b601834, 127bdc9, 8906d45 (country_label import fix)
+
+
+--------------------------------------------------------------------------------
+[X] AI DJ — 다른 질문인데 같은 곡 반복
+--------------------------------------------------------------------------------
+  요청: 챗봇 추천 노래가 서로 다른 질문에도 똑같이 나옴
+
+  문제:
+    - k-pop 등 범용 country 태그가 Last.fm 검색을 지배
+    - rules 폴백이 대화 전체 스캔 → 이전 키워드 고착
+    - 세션 내 exclude 없음
+
+  조치:
+    - pick_search_keywords: 구체 구문 우선, k-pop 후순위
+    - rules 폴백: 마지막 user 메시지만
+    - exclude_tracks (프론트→백엔드), track_dedupe_key
+    - recommend_by_keywords search_keywords + exclude_keys
+    - 커밋: 7558e7e
+
+
+--------------------------------------------------------------------------------
+[Y] 문서 — 코드 분석 페이지 갱신
+--------------------------------------------------------------------------------
+  요청: 수정할 때마다 GitHub 코드 분석/설명 페이지 업데이트; 미반영분 일괄 반영
+
+  조치:
+    - docs/HOW_IT_WORKS.md — AI DJ, Gemini, API, 변경 이력
+    - docs/CODE_WALKTHROUGH.md — 신규 파일·함수
+    - docs/USER_REQUEST_ANALYSIS.txt — 요청 [R]~[Y]
+    - README.md — 기능·API·env
+    - .cursor/rules/project.mdc — 코드 변경 시 문서 동기화 규칙
+
+
 ================================================================================
 3. 기능 영역별 요약 — 사용자 의도 맵
 ================================================================================
@@ -265,8 +365,9 @@
   │ 검색            │ 정확도·오피셜·원명·50건·예시 칩                      │
   │ 추천            │ 유사도 신뢰, AI 설명, 다중 장르 AND, 국가 필터       │
   │ 장르 맵         │ 홈 탐색, 검색, 국가와 독립, 잘못된 잔존 추천 제거    │
-  │ UI/UX           │ 로고, 활성 칩 색, 유사도 툴팁                        │
-  │ 운영            │ GitHub + Render 자동 배포                            │
+  │ AI DJ           │ 자연어 큐레이션, 장르 Q&A, Gemini, 중복 추천 방지    │
+  │ UI/UX           │ 로고, 활성 칩 색, 유사도 툴팁, distribution polish    │
+  │ 운영            │ GitHub + Render 자동 배포, docs 동기화                │
   └─────────────────┴──────────────────────────────────────────────────────┘
 
 
@@ -274,24 +375,28 @@
 4. 주요 변경 파일 (반복적으로 건드린 곳)
 ================================================================================
 
-  backend/music_api.py      — 검색 relevance, official 판별, 유사도, 장르/키워드 추천
-  backend/country_filter.py — 국가 strict 매칭
-  backend/search_aliases.py — 한글→영문 canonical
-  frontend/src/App.jsx      — 검색 UI, AiReasonBox, 예시 칩, 정렬
+  backend/music_api.py          — 검색 relevance, official, recommend_by_keywords exclude
+  backend/taste_analysis.py     — AI DJ 의도, pick_search_keywords
+  backend/openai_service.py     — LLM 답변, 추천 이유
+  backend/llm_config.py         — Gemini env
+  backend/country_filter.py     — 국가 strict 매칭
+  backend/search_aliases.py     — 한글→영문 canonical
+  frontend/src/App.jsx          — 검색 UI, AiReasonBox, 예시 칩
+  frontend/src/pages/ChatPage.jsx — AI DJ
   frontend/src/components/HomeGenreMap.jsx
   frontend/src/components/GenreExplorer.jsx
   frontend/src/components/CountryPicker.jsx
   frontend/src/utils/chipButton.js
   frontend/src/utils/similarityHelp.js
+  docs/HOW_IT_WORKS.md, CODE_WALKTHROUGH.md, USER_REQUEST_ANALYSIS.txt
 
 
 ================================================================================
 5. 아직 열린 이슈 / 한계 (ponytail 메모)
 ================================================================================
 
-  - Every Noise 장르 alias (digicore ↔ glitchcore)는 맵 의도된 동작
-  - YT-only hit는 비오피셜 — obscure 곡은 catalog hit 없으면 순위 낮음
-  - 로컬 git에 line-ending 등 미커밋 dirty 파일 다수 (기능과 무관)
+  - AI DJ: Gemini 무료 한도 — flash-lite 일일 quota; counsel은 flash
+  - embedding은 OpenAI 전용 — Gemini-only면 taste embedding skip
   - project-practice(8001)와 music(8020/Render) 코드 혼용 금지
 
 
@@ -301,18 +406,22 @@
 
   ae94a26  custom logo
   74a7c6a  home genre map interactive
-  cefff5a  genre search on map
-  f18d259…bc14bc5  multi-genre AND + country filter fixes
-  7af2755  map shows all genres with country selected
-  02d96e7  clear recs on 0 genre match
-  7f32e59  search relevance fix
-  c2fda8f  official-first search
-  4390dd3  canonical query (KO/EN)
-  7f611ab  search limit 50
-  e34b148  example search chips
-  72a9eeb  active chip colors
-  3ca41e7  similarity tooltip on AI reason box
+  …        (검색·국가·AND 장르 — 위 [A]~[P] 참고)
+  3ca41e7  similarity tooltip
+  a6fb85d  OpenAI chatbot + MusicNote avatar
+  51a93d1  taste counseling + live curation
+  78ba20d  genre map Q&A + shortcut chips
+  3068a17  AI DJ branding
+  868b411  AI API error fallback
+  47c8557  Gemini default LLM
+  2c414a4  distribution UI polish
+  27c1bbb  AiReasonBox readability
+  b601834  Korean trap / country in chat
+  127bdc9  chat intent conversation context
+  8906d45  country_label import fix
+  8038870  ChatPage build fix
+  7558e7e  fix duplicate chat recommendations
 
 ================================================================================
-  END
+  END — 마지막 갱신: 2026-08-04
 ================================================================================
