@@ -47,7 +47,7 @@ AUDIODB_API_KEY=2
 # AI DJ (Google AI Studio 키 → OPENAI_API_KEY에 넣음)
 OPENAI_API_KEY=AIza...
 OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
-OPENAI_MODEL=gemini-2.5-flash-lite
+OPENAI_MODEL=gemini-2.0-flash-lite
 OPENAI_COUNSEL_MODEL=gemini-2.5-flash
 
 # 선택

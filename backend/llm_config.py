@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 
-# Google Gemini free tier (Flash-Lite: ~1,000 req/day)
+# Google Gemini free tier — 2.5-flash-lite는 신규 키 404 → 2.0-flash-lite
 _GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
-_GEMINI_MODEL = "gemini-2.5-flash-lite"
+_GEMINI_MODEL = "gemini-2.0-flash-lite"
 
 
 def api_key() -> str:
